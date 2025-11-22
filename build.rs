@@ -1,7 +1,8 @@
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() {
     tonic_prost_build::configure()
         .build_client(false)
-        // .out_dir("out/proto")
-        .compile_protos(&["proto/hello.proto"], &["proto"])?;
-    Ok(())
+        .compile_protos(&["proto/store.proto"], &["proto"])
+        .unwrap();
 }
+
+// https://github.com/hyperium/tonic/tree/master/tonic-prost-build

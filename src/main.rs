@@ -1,14 +1,12 @@
-use tonic::{Request, Response, Status};
+use dee_kv::server;
 
-pub mod hello {
-    tonic::include_proto!("hello");
-}
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    server::start().await?;
 
-fn main() {
-    println!("Hello world");
+    Ok(())
 }
 
 // https://docs.rs/tonic/latest/tonic/
 // https://github.com/tokio-rs/prost
-// https://github.com/hyperium/tonic/tree/master/tonic-prost-build
 // https://docs.rs/tokio/1.48.0/tokio/
