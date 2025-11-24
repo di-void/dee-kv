@@ -10,6 +10,20 @@ pub struct Store {
     _store: HashMap<String, Types>,
 }
 
+// for testing
+impl Default for Store {
+    fn default() -> Self {
+        let mut test_kv = [("foo", "bar"), ("boo", "baz"), ("dee", "kv")];
+
+        let test_hash = test_kv
+            .iter()
+            .map(|(k, v)| (k.to_string(), Types::String(v.to_string())))
+            .collect::<HashMap<_, _>>();
+
+        Self { _store: test_hash }
+    }
+}
+
 impl Store {
     pub fn new() -> Self {
         Self {
