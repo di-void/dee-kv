@@ -21,16 +21,14 @@ impl Store for StoreService {
         let key = msg.key;
 
         let r = self.kv.read().await;
-        let v = r.get(&key);
-        let value = if v.is_some() {
-            match v.unwrap() {
-                Types::String(s) => s,
+        let value = r.get(&key);
+        if let Some(v) = value {
+            match v {
+                Types::String(s) => Ok(Response::new(GetReply { key, value: s })),
             }
         } else {
-            "".to_string()
-        };
-
-        Ok(Response::new(GetReply { key, value }))
+            Err(Status::invalid_argument(format!("{key} doesn't exist")))
+        }
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutReply>, Status> {
@@ -59,10 +57,7 @@ impl Store for StoreService {
                 }
             }
         } else {
-            Ok(Response::new(DeleteReply {
-                key,
-                value: "".to_string(),
-            }))
+            Err(Status::invalid_argument(format!("{key} doesn't exist")))
         }
     }
 }
