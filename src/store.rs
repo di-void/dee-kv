@@ -13,7 +13,7 @@ pub struct Store {
 // for testing
 impl Default for Store {
     fn default() -> Self {
-        let mut test_kv = [("foo", "bar"), ("boo", "baz"), ("dee", "kv")];
+        let test_kv = [("foo", "bar"), ("boo", "baz"), ("dee", "kv")];
 
         let test_hash = test_kv
             .iter()
@@ -25,12 +25,6 @@ impl Default for Store {
 }
 
 impl Store {
-    pub fn new() -> Self {
-        Self {
-            _store: HashMap::new(),
-        }
-    }
-
     pub fn get(&self, k: &str) -> Option<Types> {
         if let Some(val) = self._store.get(k) {
             Some(val.to_owned())
@@ -45,5 +39,11 @@ impl Store {
 
     pub fn delete(&mut self, k: &str) {
         self._store.remove(k);
+    }
+}
+
+impl From<String> for Types {
+    fn from(value: String) -> Self {
+        Types::String(value)
     }
 }
