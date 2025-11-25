@@ -1,3 +1,4 @@
+use crate::log::load_store;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -13,14 +14,9 @@ pub struct Store {
 // for testing
 impl Default for Store {
     fn default() -> Self {
-        let test_kv = [("foo", "bar"), ("boo", "baz"), ("dee", "kv")];
-
-        let test_hash = test_kv
-            .iter()
-            .map(|(k, v)| (k.to_string(), Types::String(v.to_string())))
-            .collect::<HashMap<_, _>>();
-
-        Self { _store: test_hash }
+        Self {
+            _store: load_store(),
+        }
     }
 }
 
