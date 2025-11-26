@@ -23,14 +23,14 @@ pub struct Log {
 pub fn serialize_entry(entry: Log) -> Result<String> {
     let mut s = serde_json::to_string(&entry)?;
     s.push_str("\n");
-    Result::Ok(s)
+    Ok(s)
 }
 
 // deserialize entry
 pub fn deserialize_entry(entry: String) -> Result<Log> {
     let s = entry.trim();
     let l = serde_json::from_str::<Log>(s)?;
-    Result::Ok(l)
+    Ok(l)
 }
 
 // https://docs.rs/serde_json/latest/serde_json/

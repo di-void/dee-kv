@@ -20,8 +20,8 @@ pub fn setup_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
 
     let handle = thread::spawn(move || {
         let log_w = match LogWriter::from_data_dir(DATA_DIR) {
-            Result::Ok(lw) => lw,
-            Result::Err(e) => {
+            Ok(lw) => lw,
+            Err(e) => {
                 println!(
                     "Failed to initalize Log writer!.\n Error: {:#?}\n\n Killing writer thread!",
                     e
