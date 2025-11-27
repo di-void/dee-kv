@@ -14,8 +14,7 @@ pub enum Operation {
     Delete(String),     // (key)
 }
 
-pub fn setup_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
-    use anyhow::Result;
+pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
@@ -31,7 +30,7 @@ pub fn setup_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
         };
 
         loop {
-            let msg = rx.blocking_recv().unwrap(); // dangerous
+            let msg = rx.blocking_recv().unwrap(); // DANGER
             match msg {
                 ChannelMessage::Append(m) => {}
                 ChannelMessage::ShutDown => {

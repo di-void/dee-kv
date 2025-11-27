@@ -5,7 +5,7 @@ use tokio::sync::{
 use tonic::{Request, Response, Status};
 
 use crate::store::{Store as KV, Types};
-use crate::{ChannelMessage, log::setup_writer};
+use crate::{ChannelMessage, log::setup_log_writer};
 use store_proto::store_server::{Store, StoreServer};
 use store_proto::{DeleteReply, GetReply, KeyRequest, PutReply, PutRequest};
 
@@ -88,7 +88,7 @@ pub async fn start() -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // back-pressure
     let my_store = StoreService::from_sender(tx);
 
-    let t_handle = setup_writer(rx); // setup 'writer' thread
+    let t_handle = setup_log_writer(rx); // setup 'writer' thread
 
     tonic::transport::Server::builder()
         .add_service(StoreServer::new(my_store))

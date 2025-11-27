@@ -1,7 +1,9 @@
-use std::fs::{Metadata, create_dir_all};
-use std::path::Path;
+use anyhow::{Context, Result};
+use std::ffi::OsStr;
+use std::fs::{Metadata, create_dir_all, read_dir};
+use std::path::{Path, PathBuf};
 
-use crate::MAX_LOG_FILE_SIZE;
+use crate::{LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
 
 pub fn generate_file_name() {
     //
@@ -15,49 +17,55 @@ pub fn write_to_file(path: &Path) {
     //
 }
 
-pub fn validate_path(path: &Path) -> anyhow::Result<()> {
+pub fn validate_path(path: &Path) -> Result<()> {
     match path.try_exists() {
         Ok(true) => Ok(()),
-        Ok(false) => {
-            println!("path: {:#?}, could not be verified", path);
-            println!("Initiating manual attempt");
-
-            if let Err(e) = create_dir_all(path) {
-                println!("Couldn't create path: {:#?}", path);
-                println!("Error: {:#?}", e);
-                return Err(e.into());
-            }
-
-            Ok(())
-        }
-        Err(er) => {
-            println!("path: {:#?}, could not be verified", path);
-            println!("Error: {:#?}", er);
-            println!("Initiating manual attempt");
-
-            if let Err(e) = create_dir_all(path) {
-                println!("Couldn't create path: {:#?}", path);
-                println!("Error: {:#?}", e);
-                return Err(e.into());
-            }
-
+        _ => {
+            println!(
+                "path: {:#?}, could not be verified\n Initiating manual attempt",
+                path
+            );
+            create_dir_all(path)
+                .with_context(|| format!("Failed to create ./DATA directory at {:?}", path))?;
             Ok(())
         }
     }
 }
 
-pub struct LogFileEntry<'entry> {
-    pub file_id: u16,
-    pub file_path: &'entry Path,
+pub struct LogFileEntry {
+    pub file_id: u32,
+    pub file_path: PathBuf,
     pub meta: Metadata,
 }
 
-pub fn get_log_files(path: &Path) -> Vec<LogFileEntry<'_>> {
-    // iterate through entries in the directory
-    // filter by .aof files
-    // map to their parsed file names
-    // then sort by their file names
-    todo!("get log files")
+pub fn get_log_files(path: &Path) -> Result<Vec<LogFileEntry>> {
+    let rd = read_dir(path).unwrap();
+    let mut entries = rd
+        .map(|e| e.expect("Error getting next dir entry"))
+        .filter(|e| {
+            let path = e.path();
+            let p = path.extension().unwrap_or(OsStr::new(""));
+            p == LOG_FILE_EXT
+        })
+        .map(|e| {
+            let file_name = e.file_name();
+            let path = e.path();
+            let file_id = file_name.to_str().unwrap().parse::<u32>().unwrap();
+            let meta = e
+                .metadata()
+                .expect(&format!("Failed to get file metatadata: {:?}", path));
+
+            LogFileEntry {
+                file_id,
+                file_path: path,
+                meta,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // then sort by their file ids
+    entries.sort_by(|a, b| a.file_id.cmp(&b.file_id));
+    Ok(entries)
 }
 
 pub fn check_file_delta(file_size: u64) -> u8 {
