@@ -33,6 +33,8 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
             }
         };
 
+        println!("Writer thread has started!");
+
         let mut now = Instant::now();
         let mut check_delta = false;
         let timeout = Duration::from_millis(LOG_FILE_CHECK_TIMEOUT as u64);
@@ -104,9 +106,12 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
 // replay file to rebuild in-mem map
 pub fn load_store(path: &Path) -> Result<HashMap<String, Types>> {
     let mut hash: HashMap<String, Types> = HashMap::new();
+    println!("Rebuilding map..");
     let files = get_log_files(path)?;
+    println!("Replaying logs..");
     for file in files {
-        replay_log_file(file, &mut hash)?;
+        replay_log_file(file.clone(), &mut hash)?;
+        println!("Done replaying log file: {:?}", file);
     }
 
     Ok(hash)

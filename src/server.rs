@@ -101,6 +101,8 @@ pub async fn start() -> anyhow::Result<()> {
 
     let t_handle = setup_log_writer(rx); // setup 'writer' thread
 
+    println!("Server is starting...");
+
     tonic::transport::Server::builder()
         .add_service(StoreServer::new(my_store))
         .serve(addr)

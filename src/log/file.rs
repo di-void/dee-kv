@@ -10,9 +10,10 @@ use crate::store::Types;
 use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
 
 pub fn generate_file_name() -> String {
-    use std::time::Instant;
-    let now = Instant::now();
-    let mut timestamp_ms = now.elapsed().as_millis().to_string();
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let mut timestamp_ms = now.as_millis().to_string();
     timestamp_ms.push_str(&format!(".{LOG_FILE_EXT}"));
     timestamp_ms
 }
@@ -21,13 +22,14 @@ pub fn create_file(name: &str, parent_dir: &Path) -> Result<File> {
     let file_path = parent_dir.join(name);
     let file = OpenOptions::new()
         .append(true)
+        .read(true)
         .create_new(true)
         .open(&file_path)?;
     Ok(file)
 }
 
 pub fn open_file(path: &Path) -> Result<File> {
-    let fh = OpenOptions::new().append(true).open(path)?;
+    let fh = OpenOptions::new().append(true).read(true).open(path)?;
     Ok(fh)
 }
 
@@ -45,14 +47,16 @@ pub fn validate_or_create_path(path: &Path) -> Result<()> {
     }
 }
 
-// #[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LogFile {
-    pub file_id: u32,
+    pub file_id: u64,
     pub file_path: PathBuf,
     pub meta: Metadata,
 }
 
 pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
+    let _ = validate_or_create_path(path)?;
+
     let rd = read_dir(path).unwrap();
     let mut entries = rd
         .map(|e| e.expect("Error getting next dir entry"))
@@ -62,9 +66,9 @@ pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
             p == LOG_FILE_EXT
         })
         .map(|e| {
-            let file_name = e.file_name();
             let path = e.path();
-            let file_id = file_name.to_str().unwrap().parse::<u32>().unwrap();
+            let file_name = path.file_stem().unwrap();
+            let file_id = file_name.to_str().unwrap().parse::<u64>().unwrap();
             let meta = e
                 .metadata()
                 .expect(&format!("Failed to get file metatadata: {:?}", path));

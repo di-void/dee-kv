@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 
 use crate::{
-    LOG_FILE_DELTA_THRESH,
+    LOG_FILE_BUF_MAX, LOG_FILE_DELTA_THRESH,
     log::file::{generate_file_name, open_file},
 };
 
@@ -59,7 +59,7 @@ impl LogWriter {
             })?;
 
             Ok(Self {
-                curr_file: BufWriter::new(fh),
+                curr_file: BufWriter::with_capacity(LOG_FILE_BUF_MAX.into(), fh),
                 data_dir_path: path.to_path_buf(),
             })
         } else {
@@ -85,7 +85,7 @@ impl LogWriter {
             }
 
             Ok(Self {
-                curr_file: BufWriter::new(file),
+                curr_file: BufWriter::with_capacity(LOG_FILE_BUF_MAX.into(), file),
                 data_dir_path: path.to_path_buf(),
             })
         }
