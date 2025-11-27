@@ -1,10 +1,11 @@
 mod file;
 mod writer;
 
-use crate::store::Types;
+use crate::{LOG_FILE_CHECK_TIMEOUT, store::Types};
 use std::{
     collections::HashMap,
     thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
 
 use crate::serde::{Log, LogOperation, Payload, serialize_entry};
@@ -27,8 +28,18 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
             }
         };
 
+        let mut now = Instant::now();
+        let mut check_delta = false;
+        let timeout = Duration::from_millis(LOG_FILE_CHECK_TIMEOUT as u64);
+
         loop {
             let msg = rx.blocking_recv().unwrap(); // DANGER
+            let has_timed_out = now.elapsed() >= timeout;
+            if has_timed_out {
+                now = Instant::now();
+                check_delta = true;
+            }
+
             match msg {
                 ChannelMessage::Append(m) => match m {
                     Op::Delete(key) => {
@@ -36,13 +47,17 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
                             operation: LogOperation::Delete,
                             payload: Payload::Delete { key: key.clone() },
                         })
-                        .with_context(|| format!("Failed to serialize Delete payload: ({key})"))
+                        .with_context(|| format!("Failed to serialize Delete payload: ({})", &key))
                         .unwrap();
 
-                        let _ = log_w
-                            .append(serialized_payload)
+                        let b = log_w
+                            .append(serialized_payload, check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
+
+                        check_delta = false;
+
+                        println!("LogWriter wrote {b} bytes for {:?}", Op::Delete(key));
                     }
                     Op::Put(key, val) => {
                         let serialized_payload = serialize_entry(Log {
@@ -53,14 +68,21 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
                             },
                         })
                         .with_context(|| {
-                            format!("Failed to serialize Put payload: ({key}:{:?})", val)
+                            format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
                         })
                         .unwrap();
 
-                        let _ = log_w
-                            .append(serialized_payload)
+                        let b = log_w
+                            .append(serialized_payload, check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
+
+                        check_delta = false;
+
+                        println!(
+                            "LogWriter wrote {b} bytes for {:?}",
+                            Op::Put(key, val.into())
+                        );
                     }
                 },
                 ChannelMessage::ShutDown => {
