@@ -1,5 +1,6 @@
-use crate::log::load_store;
+use crate::{DATA_DIR, log::load_store};
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub enum Types {
@@ -15,7 +16,7 @@ pub struct Store {
 impl Default for Store {
     fn default() -> Self {
         Self {
-            _store: load_store(),
+            _store: load_store(Path::new(DATA_DIR)).unwrap(),
         }
     }
 }

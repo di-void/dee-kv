@@ -1,16 +1,21 @@
 mod file;
 mod writer;
 
-use crate::{LOG_FILE_CHECK_TIMEOUT, store::Types};
+use crate::{
+    LOG_FILE_CHECK_TIMEOUT,
+    log::file::{get_log_files, replay_log_file},
+    store::Types,
+};
 use std::{
     collections::HashMap,
+    path::Path,
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
 use crate::serde::{Log, LogOperation, Payload, serialize_entry};
 use crate::{ChannelMessage, DATA_DIR, Op};
-use anyhow::Context;
+use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
 
 pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
@@ -97,16 +102,12 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
 }
 
 // replay file to rebuild in-mem map
-pub fn load_store() -> HashMap<String, Types> {
-    // TODO: replay log file
+pub fn load_store(path: &Path) -> Result<HashMap<String, Types>> {
+    let mut hash: HashMap<String, Types> = HashMap::new();
+    let files = get_log_files(path)?;
+    for file in files {
+        replay_log_file(file, &mut hash)?;
+    }
 
-    let test_kv = [("foo", "bar"), ("boo", "baz"), ("dee", "kv")];
-    let test_hash = test_kv
-        .iter()
-        .map(|(k, v)| (k.to_string(), v.to_string().into()))
-        .collect::<HashMap<_, _>>();
-
-    test_hash
+    Ok(hash)
 }
-
-// compact the log

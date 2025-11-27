@@ -5,7 +5,7 @@ use crate::{
     log::file::{generate_file_name, open_file},
 };
 
-use super::file::{check_file_delta, create_file, get_log_files, validate_path};
+use super::file::{check_file_delta, create_file, get_log_files, validate_or_create_path};
 use std::{
     fs::File,
     io::{BufWriter, Write},
@@ -19,9 +19,8 @@ pub struct LogWriter {
 }
 
 impl LogWriter {
-    pub fn append(&mut self, payload: String, check_delta: bool) -> Result<usize> {
-        // if check_delta is true
-        if check_delta {
+    pub fn append(&mut self, payload: String, should_check: bool) -> Result<usize> {
+        if should_check {
             let f_meta = self.curr_file.get_ref().metadata()?;
             if check_file_delta(f_meta.file_size()) >= LOG_FILE_DELTA_THRESH {
                 let fname = generate_file_name();
@@ -47,7 +46,7 @@ impl LogWriter {
 
     pub fn from_data_dir(dir_name: &str) -> Result<Self> {
         let path = Path::new(dir_name);
-        let _ = validate_path(path)?;
+        let _ = validate_or_create_path(path)?;
         let files = get_log_files(path)?;
         if files.len() == 0 {
             let fname = generate_file_name();

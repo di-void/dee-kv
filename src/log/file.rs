@@ -1,9 +1,13 @@
 use anyhow::{Context, Result};
+use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{File, Metadata, OpenOptions, create_dir_all, read_dir};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use crate::{LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
+use crate::serde::{LogOperation, Payload, deserialize_entry};
+use crate::store::Types;
+use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
 
 pub fn generate_file_name() -> String {
     use std::time::Instant;
@@ -27,7 +31,7 @@ pub fn open_file(path: &Path) -> Result<File> {
     Ok(fh)
 }
 
-pub fn validate_path(path: &Path) -> Result<()> {
+pub fn validate_or_create_path(path: &Path) -> Result<()> {
     match path.try_exists() {
         Ok(true) => Ok(()),
         _ => {
@@ -35,13 +39,13 @@ pub fn validate_path(path: &Path) -> Result<()> {
                 "path: {:#?}, could not be verified\n Initiating manual attempt",
                 path
             );
-            create_dir_all(path)
-                .with_context(|| format!("Failed to create ./DATA directory at {:?}", path))?;
+            create_dir_all(path).with_context(|| format!("Failed to create path: {:?}", path))?;
             Ok(())
         }
     }
 }
 
+// #[derive(Clone)]
 pub struct LogFile {
     pub file_id: u32,
     pub file_path: PathBuf,
@@ -81,4 +85,30 @@ pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
 pub fn check_file_delta(file_size: u64) -> u8 {
     let p = file_size / MAX_LOG_FILE_SIZE * 100;
     p as u8
+}
+
+pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Result<()> {
+    let file = open_file(&file.file_path)?;
+    let file = BufReader::new(file);
+
+    file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|v| {
+        let bytes = v.unwrap();
+        let log = deserialize_entry(&bytes).unwrap();
+
+        let op = log.operation;
+        match op {
+            LogOperation::Put => {
+                if let Payload::Put { key, value } = log.payload {
+                    hash.insert(key, value.into());
+                }
+            }
+            LogOperation::Delete => {
+                if let Payload::Delete { key } = log.payload {
+                    hash.remove(&key);
+                }
+            }
+        }
+    });
+
+    Ok(())
 }

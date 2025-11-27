@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
+use crate::LOG_FILE_DELIM;
+
 #[derive(Serialize, Deserialize)]
 pub enum LogOperation {
     Put,
@@ -22,14 +24,13 @@ pub struct Log {
 // serialize entry
 pub fn serialize_entry(entry: Log) -> Result<String> {
     let mut se = serde_json::to_string(&entry)?;
-    se.push_str("\n");
+    se.push_str(LOG_FILE_DELIM);
     Ok(se)
 }
 
 // deserialize entry
-pub fn _deserialize_entry(entry: String) -> Result<Log> {
-    let s = entry.trim();
-    let le = serde_json::from_str::<Log>(s)?;
+pub fn deserialize_entry(entry: &[u8]) -> Result<Log> {
+    let le = serde_json::from_slice::<Log>(entry)?;
     Ok(le)
 }
 
