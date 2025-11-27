@@ -1,24 +1,22 @@
 mod file;
 mod writer;
+
 use crate::store::Types;
 use std::{
     collections::HashMap,
     thread::{self, JoinHandle},
 };
 
-use crate::{ChannelMessage, DATA_DIR};
+use crate::serde::{Log, LogOperation, Payload, serialize_entry};
+use crate::{ChannelMessage, DATA_DIR, Op};
+use anyhow::Context;
 use tokio::sync::mpsc::Receiver;
-
-pub enum Operation {
-    Put(String, Types), // (key, value)
-    Delete(String),     // (key)
-}
 
 pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
-        let log_w = match LogWriter::from_data_dir(DATA_DIR) {
+        let mut log_w = match LogWriter::from_data_dir(DATA_DIR) {
             Ok(lw) => lw,
             Err(e) => {
                 println!(
@@ -32,7 +30,39 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
         loop {
             let msg = rx.blocking_recv().unwrap(); // DANGER
             match msg {
-                ChannelMessage::Append(m) => {}
+                ChannelMessage::Append(m) => match m {
+                    Op::Delete(key) => {
+                        let serialized_payload = serialize_entry(Log {
+                            operation: LogOperation::Delete,
+                            payload: Payload::Delete { key: key.clone() },
+                        })
+                        .with_context(|| format!("Failed to serialize Delete payload: ({key})"))
+                        .unwrap();
+
+                        let _ = log_w
+                            .append(serialized_payload)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
+                    }
+                    Op::Put(key, val) => {
+                        let serialized_payload = serialize_entry(Log {
+                            operation: LogOperation::Put,
+                            payload: Payload::Put {
+                                key: key.clone(),
+                                value: val.clone().into(),
+                            },
+                        })
+                        .with_context(|| {
+                            format!("Failed to serialize Put payload: ({key}:{:?})", val)
+                        })
+                        .unwrap();
+
+                        let _ = log_w
+                            .append(serialized_payload)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
+                    }
+                },
                 ChannelMessage::ShutDown => {
                     // cleanup
                     break;

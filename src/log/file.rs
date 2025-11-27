@@ -42,13 +42,13 @@ pub fn validate_path(path: &Path) -> Result<()> {
     }
 }
 
-pub struct LogFileEntry {
+pub struct LogFile {
     pub file_id: u32,
     pub file_path: PathBuf,
     pub meta: Metadata,
 }
 
-pub fn get_log_files(path: &Path) -> Result<Vec<LogFileEntry>> {
+pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
     let rd = read_dir(path).unwrap();
     let mut entries = rd
         .map(|e| e.expect("Error getting next dir entry"))
@@ -65,7 +65,7 @@ pub fn get_log_files(path: &Path) -> Result<Vec<LogFileEntry>> {
                 .metadata()
                 .expect(&format!("Failed to get file metatadata: {:?}", path));
 
-            LogFileEntry {
+            LogFile {
                 file_id,
                 file_path: path,
                 meta,

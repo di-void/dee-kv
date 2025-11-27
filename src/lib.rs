@@ -3,8 +3,13 @@ mod serde;
 pub mod server;
 mod store;
 
+pub enum Op {
+    Put(String, store::Types), // (key, value)
+    Delete(String),            // (key)
+}
+
 pub enum ChannelMessage {
-    Append(()),
+    Append(Op),
     ShutDown,
 }
 

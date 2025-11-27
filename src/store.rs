@@ -1,7 +1,7 @@
 use crate::log::load_store;
 use std::collections::HashMap;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Types {
     String(String),
 }
@@ -41,5 +41,13 @@ impl Store {
 impl From<String> for Types {
     fn from(value: String) -> Self {
         Types::String(value)
+    }
+}
+
+impl From<Types> for String {
+    fn from(value: Types) -> Self {
+        match value {
+            Types::String(s) => s,
+        }
     }
 }

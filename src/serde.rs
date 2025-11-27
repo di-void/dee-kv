@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
 #[derive(Serialize, Deserialize)]
-pub enum Operation {
+pub enum LogOperation {
     Put,
     Delete,
 }
@@ -15,7 +15,7 @@ pub enum Payload {
 
 #[derive(Serialize, Deserialize)]
 pub struct Log {
-    pub operation: Operation,
+    pub operation: LogOperation,
     pub payload: Payload,
 }
 
@@ -27,7 +27,7 @@ pub fn serialize_entry(entry: Log) -> Result<String> {
 }
 
 // deserialize entry
-pub fn deserialize_entry(entry: String) -> Result<Log> {
+pub fn _deserialize_entry(entry: String) -> Result<Log> {
     let s = entry.trim();
     let le = serde_json::from_str::<Log>(s)?;
     Ok(le)

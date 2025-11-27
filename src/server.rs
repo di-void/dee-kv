@@ -4,8 +4,11 @@ use tokio::sync::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::store::{Store as KV, Types};
 use crate::{ChannelMessage, log::setup_log_writer};
+use crate::{
+    Op,
+    store::{Store as KV, Types},
+};
 use store_proto::store_server::{Store, StoreServer};
 use store_proto::{DeleteReply, GetReply, KeyRequest, PutReply, PutRequest};
 
@@ -52,7 +55,13 @@ impl Store for StoreService {
         let tx = self.w_tx.clone();
 
         let mut w = self.kv.write().await;
-        tx.send(ChannelMessage::Append(())).await.unwrap(); // append to log
+        tx.send(ChannelMessage::Append(Op::Put(
+            kv.0.clone(),
+            kv.1.clone().into(),
+        )))
+        .await
+        .unwrap(); // append to log
+
         w.set((&kv.0, kv.1.clone().into()));
 
         Ok(Response::new(PutReply {
@@ -71,7 +80,9 @@ impl Store for StoreService {
             match v {
                 Types::String(value) => {
                     w.delete(&key);
-                    tx.send(ChannelMessage::Append(())).await.unwrap(); // append to log
+                    tx.send(ChannelMessage::Append(Op::Delete(key.clone())))
+                        .await
+                        .unwrap(); // append to log
                     Ok(Response::new(DeleteReply { key, value }))
                 }
             }
