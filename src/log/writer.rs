@@ -1,43 +1,68 @@
-use super::file::{check_file_delta, get_log_files, validate_path};
+use anyhow::{Context, Result};
+
+use crate::log::file::{generate_file_name, open_file};
+
+use super::file::{check_file_delta, create_file, get_log_files, validate_path};
 use std::{
+    fs::File,
+    io::{BufWriter, Write},
     os::windows::fs::MetadataExt,
-    path::{Path, PathBuf},
+    path::Path,
 };
 
 pub struct LogWriter {
-    curr_write_path: PathBuf,
+    curr_file: BufWriter<File>,
 }
 
 impl LogWriter {
-    // add entry to log
-    pub fn append(&self, payload: String) {
-        todo!("write to the log")
+    pub fn append(&mut self, payload: String) -> Result<usize> {
+        let bytes = self
+            .curr_file
+            .write(payload.as_bytes())
+            .with_context(|| format!("Failed to append to log writing payload: {:?}", payload))?;
+
+        Ok(bytes)
     }
 
-    pub fn from_data_dir(dir_name: &str) -> anyhow::Result<Self> {
-        // get the path to the data directory
+    pub fn from_data_dir(dir_name: &str) -> Result<Self> {
         let path = Path::new(dir_name);
-        // validate the path
         let _ = validate_path(path)?;
         let files = get_log_files(path)?;
-        let mut f_path: PathBuf;
         if files.len() == 0 {
-            // create a new log file
-            // set f_path to log file path
-            todo!("create new log file")
+            let new_file_name = generate_file_name();
+            let fh = create_file(&new_file_name, path).with_context(|| {
+                format!(
+                    "Failed to create new file at: {:?}/{:?}",
+                    path, new_file_name
+                )
+            })?;
+
+            Ok(Self {
+                curr_file: BufWriter::new(fh),
+            })
         } else {
             let latest = &files[files.len() - 1];
-            f_path = latest.file_path.clone();
+            let file: File;
 
             if check_file_delta(latest.meta.file_size()) >= 90 {
-                // create new log file
-                // set f_path variable to new log file path
-                todo!("create new log file")
+                let new_file_name = generate_file_name();
+                let fh = create_file(&new_file_name, path).with_context(|| {
+                    format!(
+                        "Failed to create new file at: {:?}/{:?}",
+                        path, new_file_name
+                    )
+                })?;
+
+                file = fh;
+            } else {
+                let fh = open_file(&latest.file_path).with_context(|| {
+                    format!("Failed to open file at path: {:?}", &latest.file_path)
+                })?;
+                file = fh;
             }
 
-            // then create a Path for said file
             Ok(Self {
-                curr_write_path: f_path,
+                curr_file: BufWriter::new(file),
             })
         }
     }

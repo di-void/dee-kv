@@ -1,20 +1,30 @@
 use anyhow::{Context, Result};
 use std::ffi::OsStr;
-use std::fs::{Metadata, create_dir_all, read_dir};
+use std::fs::{File, Metadata, OpenOptions, create_dir_all, read_dir};
 use std::path::{Path, PathBuf};
 
 use crate::{LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
 
-pub fn generate_file_name() {
-    //
+pub fn generate_file_name() -> String {
+    use std::time::Instant;
+    let now = Instant::now();
+    let mut timestamp_ms = now.elapsed().as_millis().to_string();
+    timestamp_ms.push_str(&format!(".{LOG_FILE_EXT}"));
+    timestamp_ms
 }
 
-pub fn create_file(name: String, parent_dir: &Path) {
-    //
+pub fn create_file(name: &str, parent_dir: &Path) -> Result<File> {
+    let file_path = parent_dir.join(name);
+    let file = OpenOptions::new()
+        .append(true)
+        .create_new(true)
+        .open(&file_path)?;
+    Ok(file)
 }
 
-pub fn write_to_file(path: &Path) {
-    //
+pub fn open_file(path: &Path) -> Result<File> {
+    let fh = OpenOptions::new().append(true).open(path)?;
+    Ok(fh)
 }
 
 pub fn validate_path(path: &Path) -> Result<()> {
