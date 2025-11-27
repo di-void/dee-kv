@@ -4,11 +4,11 @@ use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub enum Types {
+    // only supports string type for now
     String(String),
 }
 
 pub struct Store {
-    // only stores string values for now
     _store: HashMap<String, Types>,
 }
 
