@@ -1,9 +1,11 @@
 use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::fs::{File, Metadata, OpenOptions, create_dir_all, read_dir};
-use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    ffi::OsStr,
+    fs::{File, Metadata, OpenOptions, create_dir_all, read_dir},
+    io::{BufRead, BufReader},
+    path::{Path, PathBuf},
+};
 
 use crate::serde::{LogOperation, Payload, deserialize_entry};
 use crate::store::Types;
@@ -115,4 +117,29 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
     });
 
     Ok(())
+}
+
+pub enum CheckStatus {
+    Good,
+    Over(File),
+}
+pub fn check_or_create_file(
+    file_size: u64,
+    threshold: u8,
+    parent_path: &Path,
+) -> Result<CheckStatus> {
+    if check_file_delta(file_size) >= threshold {
+        let fname = generate_file_name();
+        let fh = create_file(&fname, parent_path).with_context(|| {
+            format!(
+                "Failed to create new file at: {:?}/{:?}",
+                parent_path.to_str().unwrap(),
+                fname
+            )
+        })?;
+
+        Ok(CheckStatus::Over(fh))
+    } else {
+        Ok(CheckStatus::Good)
+    }
 }

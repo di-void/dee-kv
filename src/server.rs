@@ -4,9 +4,9 @@ use tokio::sync::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::{ChannelMessage, log::setup_log_writer};
 use crate::{
-    Op,
+    ChannelMessage, Op,
+    log::setup_log_writer,
     store::{Store as KV, Types},
 };
 use store_proto::store_server::{Store, StoreServer};
@@ -79,10 +79,10 @@ impl Store for StoreService {
         if let Some(v) = w.get(&key) {
             match v {
                 Types::String(value) => {
-                    w.delete(&key);
                     tx.send(ChannelMessage::Append(Op::Delete(key.clone())))
                         .await
                         .unwrap(); // append to log
+                    w.delete(&key);
                     Ok(Response::new(DeleteReply { key, value }))
                 }
             }
@@ -96,7 +96,7 @@ impl Store for StoreService {
 
 pub async fn start() -> anyhow::Result<()> {
     let addr = "[::1]:50051".parse()?;
-    let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // back-pressure
+    let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // backpressure?
     let my_store = StoreService::from_sender(tx);
 
     let t_handle = setup_log_writer(rx); // setup 'writer' thread

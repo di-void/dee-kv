@@ -12,7 +12,6 @@ pub struct Store {
     _store: HashMap<String, Types>,
 }
 
-// for testing
 impl Default for Store {
     fn default() -> Self {
         Self {
