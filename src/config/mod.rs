@@ -1,0 +1,65 @@
+use anyhow::{Context, Error, Result};
+use serde::Deserialize;
+
+#[derive(Deserialize, Clone, Debug)]
+pub struct Node {
+    id: u8,
+    address: String,
+}
+
+#[derive(Deserialize)]
+struct ClusterConfig {
+    cluster_name: String,
+    nodes: Vec<Node>,
+}
+
+#[derive(Debug)]
+pub struct Cluster {
+    name: String,
+    self_id: u8,
+    self_address: String,
+    peers: Vec<Node>,
+}
+
+use std::{collections::HashMap, fs, path::Path};
+
+pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster> {
+    let id = cli_args
+        .get("id")
+        .unwrap_or(&String::from("0"))
+        .parse::<u8>()
+        .with_context(|| format!("Failed to parse arg: 'id'"))?;
+    let s = String::new();
+    let config = cli_args.get("config").unwrap_or(&s);
+    if id == 0 {
+        return Err(Error::msg("node id can't be 0"));
+    };
+
+    let config_path = Path::new(config).canonicalize()?;
+    let config_file_contents = fs::read(config_path)?;
+    let cluster_config = serde_json::from_slice::<ClusterConfig>(&config_file_contents)
+        .with_context(|| format!("Failed to parse cluster config file"))?;
+
+    let ClusterConfig {
+        cluster_name,
+        nodes,
+    } = cluster_config;
+    let mut peers: Vec<Node> = vec![];
+    let mut self_id: u8 = 0;
+    let mut self_address: String = String::from("");
+    for node in nodes {
+        if node.id == id {
+            self_id = node.id;
+            self_address = node.address;
+        } else {
+            peers.push(node);
+        }
+    }
+
+    Ok(Cluster {
+        name: cluster_name,
+        self_id,
+        self_address,
+        peers,
+    })
+}

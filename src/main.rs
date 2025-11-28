@@ -1,10 +1,11 @@
-use dee_kv::{server, utils};
+use dee_kv::{config, server, utils};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // server::start().await?;
-    let args = utils::env::parse_cli_args();
-    println!("CLI args: {:?}", args);
+    let args = utils::env::parse_cli_args()?;
+    let cluster = config::parse_cluster_config(args)?;
+
+    server::start(cluster).await?;
 
     Ok(())
 }

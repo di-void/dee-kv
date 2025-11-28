@@ -1,7 +1,8 @@
 pub mod env {
+    use anyhow::{Error, Result};
     use std::{collections::HashMap, env};
 
-    pub fn parse_cli_args() -> HashMap<String, String> {
+    pub fn parse_cli_args() -> Result<HashMap<String, String>> {
         let mut args = env::args();
         args.next(); // skip exe
 
@@ -27,6 +28,10 @@ pub mod env {
             })
             .collect::<HashMap<_, _>>();
 
-        cli_args
+        if !cli_args.contains_key("config") || !cli_args.contains_key("id") {
+            return Err(Error::msg("--config and --id are required arguments"));
+        }
+
+        Ok(cli_args)
     }
 }

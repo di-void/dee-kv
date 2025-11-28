@@ -94,7 +94,10 @@ impl Store for StoreService {
     }
 }
 
-pub async fn start() -> anyhow::Result<()> {
+use crate::config::Cluster;
+pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
+    println!("Cluster: {:#?}", cluster_config);
+
     let addr = "[::1]:50051".parse()?;
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // backpressure?
     let my_store = StoreService::with_sender(tx);

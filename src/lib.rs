@@ -1,3 +1,4 @@
+pub mod config;
 mod log;
 mod serde;
 pub mod server;
