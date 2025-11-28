@@ -1,8 +1,10 @@
-use dee_kv::server;
+use dee_kv::{server, utils};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    server::start().await?;
+    // server::start().await?;
+    let args = utils::env::parse_cli_args();
+    println!("CLI args: {:?}", args);
 
     Ok(())
 }

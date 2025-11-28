@@ -2,6 +2,7 @@ mod log;
 mod serde;
 pub mod server;
 mod store;
+pub mod utils;
 
 #[derive(Debug)]
 pub enum Op {
