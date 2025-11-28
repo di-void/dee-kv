@@ -39,7 +39,7 @@ impl LogWriter {
         Ok(bytes)
     }
 
-    pub fn from_data_dir(dir_path: &str) -> Result<Self> {
+    pub fn with_data_dir(dir_path: &str) -> Result<Self> {
         let path = Path::new(dir_path);
         let _ = validate_or_create_path(path)?; // parent path
         let files = get_log_files(path)?;

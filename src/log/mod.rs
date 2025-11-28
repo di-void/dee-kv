@@ -22,7 +22,7 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
-        let mut log_w = match LogWriter::from_data_dir(DATA_DIR) {
+        let mut log_w = match LogWriter::with_data_dir(DATA_DIR) {
             Ok(lw) => lw,
             Err(e) => {
                 println!(

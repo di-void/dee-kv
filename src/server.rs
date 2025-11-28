@@ -22,7 +22,7 @@ struct StoreService {
 }
 
 impl StoreService {
-    fn from_sender(tx: Sender<ChannelMessage>) -> Self {
+    fn with_sender(tx: Sender<ChannelMessage>) -> Self {
         Self {
             kv: Default::default(),
             w_tx: tx,
@@ -97,7 +97,7 @@ impl Store for StoreService {
 pub async fn start() -> anyhow::Result<()> {
     let addr = "[::1]:50051".parse()?;
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // backpressure?
-    let my_store = StoreService::from_sender(tx);
+    let my_store = StoreService::with_sender(tx);
 
     let t_handle = setup_log_writer(rx); // setup 'writer' thread
 
