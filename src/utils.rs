@@ -1,5 +1,5 @@
 pub mod env {
-    use anyhow::{Error, Result};
+    use anyhow::Result;
     use std::{collections::HashMap, env};
 
     pub fn parse_cli_args() -> Result<HashMap<String, String>> {
@@ -27,10 +27,6 @@ pub mod env {
                 return Some((k.to_string(), v.to_string()));
             })
             .collect::<HashMap<_, _>>();
-
-        if !cli_args.contains_key("config") || !cli_args.contains_key("id") {
-            return Err(Error::msg("--config and --id are required arguments"));
-        }
 
         Ok(cli_args)
     }

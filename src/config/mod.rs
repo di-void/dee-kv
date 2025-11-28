@@ -24,6 +24,13 @@ pub struct Cluster {
 use std::{collections::HashMap, fs, path::Path};
 
 pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster> {
+    if !cli_args.contains_key("config") || !cli_args.contains_key("id") {
+        return Err(Error::msg(
+            "--config (config file path) and --id (node id) are required arguments",
+        ))
+        .with_context(|| format!("Error while parsing cluster config"));
+    }
+
     let id = cli_args
         .get("id")
         .unwrap_or(&String::from("0"))
@@ -32,7 +39,8 @@ pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster
     let s = String::new();
     let config = cli_args.get("config").unwrap_or(&s);
     if id == 0 {
-        return Err(Error::msg("node id can't be 0"));
+        return Err(Error::msg("node id can't be 0"))
+            .with_context(|| format!("Error while parsing cluster config"));
     };
 
     let config_path = Path::new(config).canonicalize()?;
