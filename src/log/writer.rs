@@ -1,8 +1,8 @@
 use crate::{
     LOG_FILE_BUF_MAX, LOG_FILE_DELTA_THRESH,
     log::file::{
-        CheckStatus, check_or_create_file, create_file, generate_file_name, get_log_files,
-        open_file, validate_or_create_path,
+        CheckStatus, check_file_size_or_create, create_file, generate_file_name, get_log_files,
+        open_file, validate_or_create_dir,
     },
 };
 use anyhow::{Context, Result};
@@ -22,7 +22,7 @@ impl LogWriter {
     pub fn append(&mut self, payload: String, should_check: bool) -> Result<usize> {
         if should_check {
             let f_meta = self.curr_file.get_ref().metadata()?;
-            if let CheckStatus::Over(fh) = check_or_create_file(
+            if let CheckStatus::Over(fh) = check_file_size_or_create(
                 f_meta.file_size(),
                 LOG_FILE_DELTA_THRESH,
                 &self.data_dir_path,
@@ -41,7 +41,7 @@ impl LogWriter {
 
     pub fn with_data_dir(dir_path: &str) -> Result<Self> {
         let path = Path::new(dir_path);
-        let _ = validate_or_create_path(path)?; // parent path
+        let _ = validate_or_create_dir(path)?; // parent path
         let files = get_log_files(path)?;
         if files.len() == 0 {
             let fname = generate_file_name();
@@ -61,7 +61,8 @@ impl LogWriter {
             let latest = &files[files.len() - 1];
             let file: File;
 
-            let res = check_or_create_file(latest.meta.file_size(), LOG_FILE_DELTA_THRESH, path)?;
+            let res =
+                check_file_size_or_create(latest.meta.file_size(), LOG_FILE_DELTA_THRESH, path)?;
             match res {
                 CheckStatus::Good => {
                     let fh = open_file(&latest.file_path).with_context(|| {

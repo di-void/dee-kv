@@ -35,7 +35,7 @@ pub fn open_file(path: &Path) -> Result<File> {
     Ok(fh)
 }
 
-pub fn validate_or_create_path(path: &Path) -> Result<()> {
+pub fn validate_or_create_dir(path: &Path) -> Result<()> {
     match path.try_exists() {
         Ok(true) => Ok(()),
         _ => {
@@ -57,29 +57,30 @@ pub struct LogFile {
 }
 
 pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
-    let _ = validate_or_create_path(path)?;
+    let _ = validate_or_create_dir(path)?;
 
     let rd = read_dir(path).unwrap();
     let mut entries = rd
         .map(|e| e.expect("Error getting next dir entry"))
-        .filter(|e| {
+        .filter_map(|e| {
             let path = e.path();
             let p = path.extension().unwrap_or(OsStr::new(""));
-            p == LOG_FILE_EXT
-        })
-        .map(|e| {
-            let path = e.path();
+
+            if p != LOG_FILE_EXT {
+                return None;
+            }
+
             let file_name = path.file_stem().unwrap();
             let file_id = file_name.to_str().unwrap().parse::<u64>().unwrap();
             let meta = e
                 .metadata()
                 .expect(&format!("Failed to get file metatadata: {:?}", path));
 
-            LogFile {
+            Some(LogFile {
                 file_id,
                 file_path: path,
                 meta,
-            }
+            })
         })
         .collect::<Vec<_>>();
 
@@ -123,7 +124,7 @@ pub enum CheckStatus {
     Good,
     Over(File),
 }
-pub fn check_or_create_file(
+pub fn check_file_size_or_create(
     file_size: u64,
     threshold: u8,
     parent_path: &Path,
