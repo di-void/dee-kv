@@ -1,4 +1,4 @@
-pub mod config;
+pub mod cluster;
 mod log;
 mod serde;
 pub mod server;

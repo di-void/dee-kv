@@ -13,14 +13,7 @@ struct ClusterConfig {
     nodes: Vec<Node>,
 }
 
-#[derive(Debug)]
-pub struct Cluster {
-    name: String,
-    self_id: u8,
-    self_address: String,
-    peers: Vec<Node>,
-}
-
+use super::{Cluster, Peer, PeerStatus};
 use std::{collections::HashMap, fs, path::Path};
 
 pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster> {
@@ -52,7 +45,7 @@ pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster
         cluster_name,
         nodes,
     } = cluster_config;
-    let mut peers: Vec<Node> = vec![];
+    let mut peers: Vec<Peer> = vec![];
     let mut self_id: u8 = 0;
     let mut self_address: String = String::from("");
     for node in nodes {
@@ -60,7 +53,11 @@ pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster
             self_id = node.id;
             self_address = node.address;
         } else {
-            peers.push(node);
+            peers.push(Peer {
+                id: node.id,
+                address: node.address,
+                status: PeerStatus::Dead, // dead by default
+            });
         }
     }
 

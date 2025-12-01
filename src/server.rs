@@ -9,6 +9,8 @@ use crate::{
     log::setup_log_writer,
     store::{Store as KV, Types},
 };
+use health_proto::health_check_server::{HealthCheck, HealthCheckServer};
+use health_proto::{PingReply, PingRequest};
 use store_proto::store_server::{Store, StoreServer};
 use store_proto::{DeleteReply, GetReply, KeyRequest, PutReply, PutRequest};
 
@@ -16,9 +18,23 @@ pub mod store_proto {
     tonic::include_proto!("store");
 }
 
+pub mod health_proto {
+    tonic::include_proto!("health");
+}
+
 struct StoreService {
     kv: RwLock<KV>, // in-mem kv
     w_tx: Sender<ChannelMessage>,
+}
+
+#[derive(Default)]
+struct HealthService {}
+
+#[tonic::async_trait]
+impl HealthCheck for HealthService {
+    async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingReply>, Status> {
+        Ok(Response::new(PingReply {}))
+    }
 }
 
 impl StoreService {
@@ -94,26 +110,29 @@ impl Store for StoreService {
     }
 }
 
-use crate::config::Cluster;
+use crate::cluster::Cluster;
 pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
     let addr = "[::1]:50051".parse()?;
-    let (tx, rx) = mpsc::channel::<ChannelMessage>(5); // backpressure?
-    let my_store = StoreService::with_sender(tx);
+    let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
+    let store_svc = StoreService::with_sender(tx);
+    let health_svc = HealthService::default();
 
-    let t_handle = setup_log_writer(rx); // setup 'writer' thread
+    let th = setup_log_writer(rx);
 
     println!("Server is starting...");
 
     tonic::transport::Server::builder()
-        .add_service(StoreServer::new(my_store))
+        .add_service(HealthCheckServer::new(health_svc))
+        .add_service(StoreServer::new(store_svc))
         .serve(addr)
         .await?;
 
-    t_handle.join().unwrap(); // join writer
+    th.join().unwrap();
     Ok(())
 }
 
 // https://docs.rs/tonic/latest/tonic/
 // https://github.com/tokio-rs/prost
+// https://github.com/hyperium/tonic/tree/master/examples

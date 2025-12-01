@@ -41,8 +41,7 @@ pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
 
         loop {
             let msg = rx.blocking_recv().unwrap(); // DANGER
-            let has_timed_out = now.elapsed() >= timeout;
-            if has_timed_out {
+            if now.elapsed() >= timeout {
                 now = Instant::now();
                 check_delta = true;
             }
