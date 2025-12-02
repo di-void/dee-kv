@@ -1,21 +1,3 @@
-// create a table of node peers with instantiated channels
-// each entry will have it's own lock so we can lock individually
-// start a heartbeat thread taking a reference to this table
-// in an infinite loop, we go through each peer
-// and for each peer we lock and ping it
-// then we spawn an async task where the returned future of the ping and reference to the entry will be sent
-// then we release the lock on the entry and move on to the next one
-// on the entry 'handler' task, we poll the future setting a request timeout
-// if the response comes before the request timeout
-// we try to acquire a lock on the entry
-// then we set the last_ping to now()
-// if the request times out without a response, we ignore the response
-// then we first check if the dead_or_alive timeout has elapsed
-// if it has, we mark the peer status as dead
-// if it has not, we just ignore and move on
-// at the end of this infinite loop, we make the thread sleep for a period of time
-// before we loop again
-
 use super::{Node, Peer, PeerStatus};
 use crate::{
     cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS},
