@@ -1,26 +1,25 @@
+use std::sync::Arc;
+
 use tokio::sync::{
     RwLock,
     mpsc::{self, Sender},
 };
 use tonic::{Request, Response, Status};
 
+use crate::health_proto::{
+    PingReply, PingRequest,
+    health_check_server::{HealthCheck, HealthCheckServer},
+};
+use crate::store_proto::{
+    DeleteReply, GetReply, KeyRequest, PutReply, PutRequest,
+    store_server::{Store, StoreServer},
+};
 use crate::{
     ChannelMessage, Op,
+    cluster::health::{init_peers, start_heartbeat_loop},
     log::setup_log_writer,
     store::{Store as KV, Types},
 };
-use health_proto::health_check_server::{HealthCheck, HealthCheckServer};
-use health_proto::{PingReply, PingRequest};
-use store_proto::store_server::{Store, StoreServer};
-use store_proto::{DeleteReply, GetReply, KeyRequest, PutReply, PutRequest};
-
-pub mod store_proto {
-    tonic::include_proto!("store");
-}
-
-pub mod health_proto {
-    tonic::include_proto!("health");
-}
 
 struct StoreService {
     kv: RwLock<KV>, // in-mem kv
@@ -119,7 +118,10 @@ pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
     let store_svc = StoreService::with_sender(tx);
     let health_svc = HealthService::default();
 
-    let th = setup_log_writer(rx);
+    let lw_handle = setup_log_writer(rx);
+    let peers_table = init_peers(&cluster_config.peers).await?;
+    let pt_arc = Arc::new(peers_table);
+    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc)).await;
 
     println!("Server is starting...");
 
@@ -129,7 +131,8 @@ pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
         .serve(addr)
         .await?;
 
-    th.join().unwrap();
+    hb_handle.join().unwrap();
+    lw_handle.join().unwrap();
     Ok(())
 }
 

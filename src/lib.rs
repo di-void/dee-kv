@@ -16,6 +16,14 @@ pub enum ChannelMessage {
     ShutDown,
 }
 
+pub mod store_proto {
+    tonic::include_proto!("store");
+}
+
+pub mod health_proto {
+    tonic::include_proto!("health");
+}
+
 pub const DATA_DIR: &str = "./DATA";
 pub const MAX_LOG_FILE_SIZE: u64 = 5_000_000; // 5mb
 pub const LOG_FILE_EXT: &str = "aof";

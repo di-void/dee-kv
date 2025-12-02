@@ -18,6 +18,7 @@ use crate::{ChannelMessage, DATA_DIR, Op};
 use anyhow::{Context, Result};
 use tokio::sync::mpsc::Receiver;
 
+/// Runs on a separate thread
 pub fn setup_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 

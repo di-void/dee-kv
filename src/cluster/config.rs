@@ -1,19 +1,6 @@
 use anyhow::{Context, Error, Result};
-use serde::Deserialize;
 
-#[derive(Deserialize, Clone, Debug)]
-pub struct Node {
-    id: u8,
-    address: String,
-}
-
-#[derive(Deserialize)]
-struct ClusterConfig {
-    cluster_name: String,
-    nodes: Vec<Node>,
-}
-
-use super::{Cluster, Peer, PeerStatus};
+use super::{Cluster, ClusterConfig, Node};
 use std::{collections::HashMap, fs, path::Path};
 
 pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster> {
@@ -45,7 +32,7 @@ pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster
         cluster_name,
         nodes,
     } = cluster_config;
-    let mut peers: Vec<Peer> = vec![];
+    let mut peers: Vec<Node> = vec![];
     let mut self_id: u8 = 0;
     let mut self_address: String = String::from("");
     for node in nodes {
@@ -53,11 +40,7 @@ pub fn parse_cluster_config(cli_args: HashMap<String, String>) -> Result<Cluster
             self_id = node.id;
             self_address = node.address;
         } else {
-            peers.push(Peer {
-                id: node.id,
-                address: node.address,
-                status: PeerStatus::Dead, // dead by default
-            });
+            peers.push(node);
         }
     }
 
