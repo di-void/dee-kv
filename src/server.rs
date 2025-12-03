@@ -1,8 +1,11 @@
 use std::sync::Arc;
 
-use tokio::sync::{
-    RwLock,
-    mpsc::{self, Sender},
+use tokio::{
+    runtime::Handle,
+    sync::{
+        RwLock,
+        mpsc::{self, Sender},
+    },
 };
 use tonic::{Request, Response, Status};
 
@@ -111,7 +114,7 @@ impl Store for StoreService {
 }
 
 use crate::cluster::Cluster;
-pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
+pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
     let addr = cluster_config.self_address.parse()?;
@@ -136,10 +139,12 @@ pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
 
     let peers_table = init_peers(&cluster_config.peers).await?;
     let pt_arc = Arc::new(peers_table);
-    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc)).await;
+    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc), rt.clone()).await;
 
     task.await.unwrap();
-    hb_handle.join().unwrap();
+    if hb_handle.is_some() {
+        hb_handle.unwrap().join().unwrap();
+    }
     lw_handle.join().unwrap();
     Ok(())
 }
