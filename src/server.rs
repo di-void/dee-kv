@@ -17,7 +17,7 @@ use crate::store_proto::{
 use crate::{
     ChannelMessage, Op,
     cluster::health::{init_peers, start_heartbeat_loop},
-    log::setup_log_writer,
+    log::start_log_writer,
     store::{Store as KV, Types},
 };
 
@@ -118,19 +118,26 @@ pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
     let store_svc = StoreService::with_sender(tx);
     let health_svc = HealthService::default();
 
-    let lw_handle = setup_log_writer(rx);
+    let lw_handle = start_log_writer(rx);
+
+    let task = tokio::spawn(async move {
+        println!("Server is listening on {addr}");
+
+        if let Err(e) = tonic::transport::Server::builder()
+            .add_service(HealthCheckServer::new(health_svc))
+            .add_service(StoreServer::new(store_svc))
+            .serve(addr)
+            .await
+        {
+            println!("Failed to start server: {:?}", e);
+        }
+    });
+
     let peers_table = init_peers(&cluster_config.peers).await?;
     let pt_arc = Arc::new(peers_table);
     let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc)).await;
 
-    println!("Server is starting...");
-
-    tonic::transport::Server::builder()
-        .add_service(HealthCheckServer::new(health_svc))
-        .add_service(StoreServer::new(store_svc))
-        .serve(addr)
-        .await?;
-
+    task.await.unwrap();
     hb_handle.join().unwrap();
     lw_handle.join().unwrap();
     Ok(())
@@ -139,3 +146,4 @@ pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
 // https://docs.rs/tonic/latest/tonic/
 // https://github.com/tokio-rs/prost
 // https://github.com/hyperium/tonic/tree/master/examples
+// https://docs.rs/tokio/1.48.0/tokio/

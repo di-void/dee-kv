@@ -55,16 +55,27 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
     let mut peers = vec![];
 
     for n in p_nodes.iter() {
-        let client = create_client(n.address.clone()).await?;
-        let peer = Peer {
-            client,
-            id: n.id,
-            last_ping: Instant::now(),
-            status: PeerStatus::Alive,
-        };
-        let peer = Arc::new(Mutex::new(peer));
+        let peer: Peer;
 
-        peers.push(peer);
+        match create_client(n.address.clone()).await {
+            Ok(client) => {
+                peer = Peer {
+                    client,
+                    id: n.id,
+                    last_ping: Instant::now(),
+                    status: PeerStatus::Alive,
+                };
+
+                let peer = Arc::new(Mutex::new(peer));
+                peers.push(peer);
+            }
+            Err(_) => {
+                println!(
+                    "Failed to initialize client for node: {:?}\n Skipping init step.",
+                    n
+                );
+            }
+        };
     }
 
     Ok(peers)

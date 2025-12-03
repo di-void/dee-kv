@@ -9,5 +9,3 @@ async fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
-
-// https://docs.rs/tokio/1.48.0/tokio/
