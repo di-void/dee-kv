@@ -26,46 +26,48 @@ pub async fn start_heartbeat_loop(
         return None;
     }
 
-    println!("Spawning thread.");
     let h = thread::spawn(move || {
         let _guard = rt.enter();
 
         loop {
-            println!("Heartbeat loop has started..");
             for (i, p) in peers_table.iter().enumerate() {
                 let peer = Arc::clone(p);
-
-                println!("Spawning handler task for peer {i}");
 
                 tokio::spawn(async move {
                     println!("Spawned handler task for peer {i} successfully");
                     // handler
                     let mut p = peer.lock().await;
-                    println!("Task acquired lock for peer {i}: {:?}", &*p);
+                    let p_ref = &*p;
+                    let p_info = format!(
+                        "{{ id: {}, status: {:?}, last_ping: {:?} }}",
+                        p_ref.id, p_ref.status, p_ref.last_ping
+                    );
+
+                    println!("Task acquired lock for peer: {}", &p_info);
 
                     let mut ping_req = Request::new(PingRequest {});
                     ping_req.set_timeout(Duration::from_millis(500));
 
                     // ping the node
-                    println!("Pinging peer node {i}: {:?}", &*p);
+                    println!("Pinging peer: {}", &p_info);
                     let res = p.client.ping(ping_req).await;
                     let now = Instant::now();
 
                     match res {
                         Ok(_) => {
-                            println!("Received OK response. Peer: {:?}, is healthy", &*p);
+                            println!("Received OK response. Peer: {}, is healthy", &p_info);
                             p.last_ping = now;
                             p.status = PeerStatus::Alive;
                         }
                         Err(e) => {
                             println!(
-                                "Received Err response. Peer: {:?}, returned error: {e}",
-                                &*p
+                                "Received Err response. Peer: {}, returned error: {e}",
+                                &p_info
                             );
                             if now.duration_since(p.last_ping)
                                 > Duration::from_millis(PEER_FAILURE_TIMEOUT_MS.into())
                             {
-                                println!("Peer: {:?} is no longer healthy. Marking as Dead", &*p);
+                                println!("Peer: {} is no longer healthy. Marking as Dead", &p_info);
                                 p.status = PeerStatus::Dead;
                             }
                         }

@@ -35,7 +35,7 @@ struct HealthService {}
 #[tonic::async_trait]
 impl HealthCheck for HealthService {
     async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingReply>, Status> {
-        println!("Received Ping Request.\n Sending reply..");
+        println!("Received Ping Request. Sending reply..");
         Ok(Response::new(PingReply {}))
     }
 }
