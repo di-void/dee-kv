@@ -32,6 +32,7 @@ struct HealthService {}
 #[tonic::async_trait]
 impl HealthCheck for HealthService {
     async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingReply>, Status> {
+        println!("Received Ping Request.\n Sending reply..");
         Ok(Response::new(PingReply {}))
     }
 }
@@ -113,7 +114,7 @@ use crate::cluster::Cluster;
 pub async fn start(cluster_config: Cluster) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
-    let addr = "[::1]:50051".parse()?;
+    let addr = cluster_config.self_address.parse()?;
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
     let store_svc = StoreService::with_sender(tx);
     let health_svc = HealthService::default();
