@@ -1,0 +1,13 @@
+{
+  "cluster_name": "example-kv",
+  "nodes": [
+    {
+      "id": 1,
+      "address": "hostname-1:9000"
+    },
+    {
+      "id": 2,
+      "address": "hostname-2:9000"
+    }
+  ]
+}
