@@ -1,5 +1,7 @@
 pub mod config;
 pub mod health;
+use std::net::SocketAddr;
+
 use serde::Deserialize;
 use tonic::transport::Channel;
 
@@ -21,7 +23,7 @@ struct ClusterConfig {
 pub struct Cluster {
     pub name: String,
     pub self_id: u8,
-    pub self_address: String,
+    pub self_address: SocketAddr,
     pub peers: Vec<Node>,
 }
 
