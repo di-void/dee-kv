@@ -1,15 +1,14 @@
 use crate::{
     LOG_FILE_BUF_MAX, LOG_FILE_DELTA_THRESH,
     log::file::{
-        CheckStatus, check_file_size_or_create, create_file, generate_file_name, get_log_files,
-        open_file, validate_or_create_dir,
+        CheckStatus, check_file_size_or_create, create_file, generate_file_name, get_file_size,
+        get_log_files, open_file, validate_or_create_dir,
     },
 };
 use anyhow::{Context, Result};
 use std::{
     fs::File,
     io::{BufWriter, Write},
-    os::windows::fs::MetadataExt,
     path::{Path, PathBuf},
 };
 
@@ -23,7 +22,7 @@ impl LogWriter {
         if should_check {
             let f_meta = self.curr_file.get_ref().metadata()?;
             if let CheckStatus::Over(fh) = check_file_size_or_create(
-                f_meta.file_size(),
+                get_file_size(&f_meta),
                 LOG_FILE_DELTA_THRESH,
                 &self.data_dir_path,
             )? {
@@ -61,8 +60,11 @@ impl LogWriter {
             let latest = &files[files.len() - 1];
             let file: File;
 
-            let res =
-                check_file_size_or_create(latest.meta.file_size(), LOG_FILE_DELTA_THRESH, path)?;
+            let res = check_file_size_or_create(
+                get_file_size(&latest.meta),
+                LOG_FILE_DELTA_THRESH,
+                path,
+            )?;
             match res {
                 CheckStatus::Good => {
                     let fh = open_file(&latest.file_path).with_context(|| {

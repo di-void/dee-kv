@@ -1,0 +1,38 @@
+name: dee-kv
+
+services:
+  node1:
+    image: dee/kv-store
+    build: .
+    ports:
+      - "50051:9000"
+    volumes:
+      - log-data:/node-1
+    command:
+      - --id=1
+      - --config=./docker-cluster.config.json
+
+  node2:
+    image: dee/kv-store
+    build: .
+    ports:
+      - "50052:9000"
+    volumes:
+      - log-data:/node-2
+    command:
+      - --id=2
+      - --config=./docker-cluster.config.json
+
+  node3:
+    image: dee/kv-store
+    build: .
+    ports:
+      - "50053:9000"
+    volumes:
+      - log-data:/node-3
+    command:
+      - --id=3
+      - --config=./docker-cluster.config.json
+
+volumes:
+  log-data:

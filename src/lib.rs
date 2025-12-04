@@ -25,6 +25,9 @@ pub mod health_proto {
 }
 
 pub const DATA_DIR: &str = "./DATA";
+pub const LOCAL_HOST_IPV6: &str = "[::1]";
+pub const LOCAL_HOST_IPV4: &str = "127.0.0.1";
+pub const WILDCARD_IPV4: &str = "0.0.0.0";
 pub const MAX_LOG_FILE_SIZE: u64 = 5_000_000; // 5mb
 pub const LOG_FILE_EXT: &str = "aof";
 pub const LOG_FILE_DELTA_THRESH: u8 = 90; // 90%

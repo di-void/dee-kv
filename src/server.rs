@@ -9,10 +9,6 @@ use tokio::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::health_proto::{
-    PingReply, PingRequest,
-    health_check_server::{HealthCheck, HealthCheckServer},
-};
 use crate::store_proto::{
     DeleteReply, GetReply, KeyRequest, PutReply, PutRequest,
     store_server::{Store, StoreServer},
@@ -22,6 +18,13 @@ use crate::{
     cluster::health::{init_peers, start_heartbeat_loop},
     log::start_log_writer,
     store::{Store as KV, Types},
+};
+use crate::{
+    LOCAL_HOST_IPV4,
+    health_proto::{
+        PingReply, PingRequest,
+        health_check_server::{HealthCheck, HealthCheckServer},
+    },
 };
 
 struct StoreService {
@@ -117,7 +120,15 @@ use crate::cluster::Cluster;
 pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
-    let addr = cluster_config.self_address.parse()?;
+    let port = cluster_config
+        .self_address
+        .split(':')
+        .last()
+        .unwrap()
+        .parse::<u16>()?;
+    let addr = format!("{LOCAL_HOST_IPV4}:{port}").parse()?;
+    println!("self-address: {}", &addr);
+
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
     let store_svc = StoreService::with_sender(tx);
     let health_svc = HealthService::default();

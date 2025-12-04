@@ -144,3 +144,15 @@ pub fn check_file_size_or_create(
         Ok(CheckStatus::Good)
     }
 }
+
+#[cfg(windows)]
+pub fn get_file_size(meta: &Metadata) -> u64 {
+    use std::os::windows::fs::MetadataExt;
+    meta.file_size()
+}
+
+#[cfg(unix)]
+pub fn get_file_size(meta: &Metadata) -> u64 {
+    use std::os::unix::fs::MetadataExt;
+    meta.size()
+}
