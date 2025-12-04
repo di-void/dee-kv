@@ -2,6 +2,11 @@ pub mod env {
     use anyhow::Result;
     use std::{collections::HashMap, env};
 
+    pub fn get_env_vars() -> HashMap<String, String> {
+        let vars = env::vars();
+        vars.collect::<HashMap<_, _>>()
+    }
+
     pub fn parse_cli_args() -> Result<HashMap<String, String>> {
         let mut args = env::args();
         args.next(); // skip exe

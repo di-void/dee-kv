@@ -9,12 +9,8 @@ use tokio::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::store_proto::{
-    DeleteReply, GetReply, KeyRequest, PutReply, PutRequest,
-    store_server::{Store, StoreServer},
-};
 use crate::{
-    ChannelMessage, Op,
+    ChannelMessage, LOOPBACK_NET_INT_STRING, Op, WILDCARD_NET_INT_STRING,
     cluster::health::{init_peers, start_heartbeat_loop},
     log::start_log_writer,
     store::{Store as KV, Types},
@@ -24,6 +20,13 @@ use crate::{
     health_proto::{
         PingReply, PingRequest,
         health_check_server::{HealthCheck, HealthCheckServer},
+    },
+};
+use crate::{
+    WILDCARD_IPV4,
+    store_proto::{
+        DeleteReply, GetReply, KeyRequest, PutReply, PutRequest,
+        store_server::{Store, StoreServer},
     },
 };
 
@@ -117,7 +120,11 @@ impl Store for StoreService {
 }
 
 use crate::cluster::Cluster;
-pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
+pub async fn start(
+    cluster_config: Cluster,
+    rt: &Handle,
+    net_interface: &str,
+) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
     let port = cluster_config
@@ -126,7 +133,13 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
         .last()
         .unwrap()
         .parse::<u16>()?;
-    let addr = format!("{LOCAL_HOST_IPV4}:{port}").parse()?;
+    let ip = match net_interface {
+        LOOPBACK_NET_INT_STRING => LOCAL_HOST_IPV4,
+        WILDCARD_NET_INT_STRING => WILDCARD_IPV4,
+        _ => unreachable!("received unknown net interface option"),
+    };
+    let addr = format!("{ip}:{port}").parse()?;
+
     println!("self-address: {}", &addr);
 
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);

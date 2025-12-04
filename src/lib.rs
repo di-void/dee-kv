@@ -25,6 +25,8 @@ pub mod health_proto {
 }
 
 pub const DATA_DIR: &str = "./DATA";
+pub const LOOPBACK_NET_INT_STRING: &str = "loopback";
+pub const WILDCARD_NET_INT_STRING: &str = "wildcard";
 pub const LOCAL_HOST_IPV6: &str = "[::1]";
 pub const LOCAL_HOST_IPV4: &str = "127.0.0.1";
 pub const WILDCARD_IPV4: &str = "0.0.0.0";

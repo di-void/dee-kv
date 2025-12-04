@@ -19,6 +19,8 @@ WORKDIR /app
 COPY --from=builder /app/target/release/dee-kv .
 COPY --from=builder /app/docker-cluster.config.json .
 
+ENV NET_INTERFACE=wildcard
+
 EXPOSE 9000
 
 ENTRYPOINT [ "./dee-kv" ]

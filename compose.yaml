@@ -7,7 +7,7 @@ services:
     ports:
       - "50051:9000"
     volumes:
-      - log-data:/node-1
+      - log-data:/app/DATA
     command:
       - --id=1
       - --config=./docker-cluster.config.json
@@ -18,7 +18,7 @@ services:
     ports:
       - "50052:9000"
     volumes:
-      - log-data:/node-2
+      - log-data:/app/DATA
     command:
       - --id=2
       - --config=./docker-cluster.config.json
@@ -29,7 +29,7 @@ services:
     ports:
       - "50053:9000"
     volumes:
-      - log-data:/node-3
+      - log-data:/app/DATA
     command:
       - --id=3
       - --config=./docker-cluster.config.json
