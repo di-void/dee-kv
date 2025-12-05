@@ -49,11 +49,21 @@ pub fn validate_or_create_dir(path: &Path) -> Result<()> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct LogFile {
     pub file_id: u64,
     pub file_path: PathBuf,
     pub meta: Metadata,
+}
+
+use std::fmt;
+impl fmt::Debug for LogFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("LogFile")
+            .field("file_id", &self.file_id)
+            .field("file_path", &self.file_path)
+            .finish()
+    }
 }
 
 pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
