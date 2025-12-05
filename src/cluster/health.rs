@@ -9,7 +9,11 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tokio::{runtime::Handle, sync::Mutex, time::sleep};
+use tokio::{
+    runtime::Handle,
+    sync::Mutex,
+    time::{sleep, timeout},
+};
 use tonic::{
     Request,
     transport::{Channel, Uri},
@@ -19,7 +23,7 @@ pub async fn start_heartbeat_loop(
     peers_table: Arc<Vec<Arc<Mutex<Peer>>>>,
     rt: Handle,
 ) -> Option<JoinHandle<()>> {
-    println!("Starting heartbeat loop.");
+    println!("Starting heartbeat loop...");
 
     if peers_table.len() == 0 {
         println!("Heartbeat loop aborted. No peers found in peers_table");
@@ -30,13 +34,12 @@ pub async fn start_heartbeat_loop(
         let _guard = rt.enter();
 
         loop {
-            for (i, p) in peers_table.iter().enumerate() {
+            for p in peers_table.iter() {
                 let peer = Arc::clone(p);
 
                 // only spawn with lock
                 if let Ok(guard) = peer.try_lock_owned() {
                     tokio::spawn(async move {
-                        println!("Spawned handler task for peer {i} successfully");
                         // handler
                         let mut p = guard;
                         let p_ref = &*p;
@@ -45,17 +48,11 @@ pub async fn start_heartbeat_loop(
                             p_ref.id, p_ref.status, p_ref.last_ping
                         );
 
-                        println!("Task acquired lock for peer: {}", &p_info);
-
-                        let mut ping_req = Request::new(PingRequest {});
-                        ping_req.set_timeout(Duration::from_millis(500));
-
                         // ping the node
                         println!("Pinging peer: {}", &p_info);
-                        let res = p.client.ping(ping_req).await;
                         let now = Instant::now();
 
-                        match res {
+                        match timed_ping_request(&mut *p, Duration::from_millis(500)).await {
                             Ok(_) => {
                                 println!("Received OK response. Peer: {}, is healthy", &p_info);
                                 p.last_ping = now;
@@ -76,17 +73,22 @@ pub async fn start_heartbeat_loop(
                                     p.status = PeerStatus::Dead;
                                 }
                             }
-                        }
+                        };
                     });
                 };
             }
 
-            println!("Heartbeat loop is pausing for a period");
             thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL_MS.into()));
         }
     });
 
     Some(h)
+}
+
+async fn timed_ping_request(peer: &mut Peer, period: Duration) -> Result<()> {
+    let req = Request::new(PingRequest {});
+    let _r = timeout(period, peer.client.ping(req)).await??;
+    Ok(())
 }
 
 pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
@@ -104,15 +106,18 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
                     status: PeerStatus::Alive,
                 };
 
-                println!("Succesfully initialized peer: {:?}", &peer);
+                println!(
+                    "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?} }}",
+                    peer.id, &peer.last_ping, &peer.status
+                );
 
                 let peer = Arc::new(Mutex::new(peer));
                 peers.push(peer);
             }
             Err(e) => {
                 println!(
-                    "Failed to initialize client for node: {:?}. Error: {:?}\n Retrying...",
-                    n, e
+                    "Failed to initialize client with id: {}. Error: {:?}\n Retrying...",
+                    n.id, e
                 );
 
                 if let Ok(client) = retry_create_client(&n.address).await {
@@ -123,7 +128,10 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
                         status: PeerStatus::Alive,
                     };
 
-                    println!("Succesfully initialized peer: {:?}", &peer);
+                    println!(
+                        "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?} }}",
+                        peer.id, &peer.last_ping, &peer.status
+                    );
 
                     let peer = Arc::new(Mutex::new(peer));
                     peers.push(peer);
@@ -138,15 +146,13 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
 }
 
 async fn retry_create_client(addr: &str) -> Result<HealthCheckClient<Channel>> {
-    println!("Retrying client init");
-
     for i in 1..=3 {
-        println!("Pass {i}");
+        println!("Retry attempt: {i}");
         if let Ok(client) = create_client(addr).await {
             return Ok(client);
         }
 
-        println!("Failed to init client. Trying again after 2 seconds.");
+        println!("Failed to init client. Trying again in 2 secs.");
         sleep(Duration::from_millis(2000)).await
     }
 
