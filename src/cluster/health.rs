@@ -11,7 +11,7 @@ use std::{
 };
 use tokio::{
     runtime::Handle,
-    sync::Mutex,
+    sync::{Mutex, watch},
     time::{sleep, timeout},
 };
 use tonic::{
@@ -22,6 +22,7 @@ use tonic::{
 pub async fn start_heartbeat_loop(
     peers_table: Arc<Vec<Arc<Mutex<Peer>>>>,
     rt: Handle,
+    shutdown_rx: watch::Receiver<Option<()>>,
 ) -> Option<JoinHandle<()>> {
     println!("Starting heartbeat loop...");
 
@@ -34,6 +35,11 @@ pub async fn start_heartbeat_loop(
         let _guard = rt.enter();
 
         loop {
+            let sd = shutdown_rx.borrow();
+            if sd.is_some() {
+                break;
+            }
+
             for p in peers_table.iter() {
                 let peer = Arc::clone(p);
 
@@ -80,6 +86,8 @@ pub async fn start_heartbeat_loop(
 
             thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL_MS.into()));
         }
+
+        println!("Shutting down hearbeat loop..");
     });
 
     Some(h)

@@ -85,3 +85,12 @@ impl LogWriter {
         }
     }
 }
+
+impl Drop for LogWriter {
+    fn drop(&mut self) {
+        match self.curr_file.flush() {
+            Ok(_) => println!("[LOG WRITER]: Flushed buffer successfully!"),
+            Err(e) => println!("[LOG WRITER]: An error occurred while flushing: {:?}", e),
+        }
+    }
+}

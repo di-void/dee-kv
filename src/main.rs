@@ -11,7 +11,9 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async move {
         let rt = rt_handle.clone();
         if let Err(e) = server::start(cluster, &rt).await {
-            println!("Failed to start server. Error: {:?}", e);
+            println!("Error while starting server: {:?}", e);
+        } else {
+            println!("Server shutdown successfully!");
         }
     });
 

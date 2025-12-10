@@ -16,10 +16,10 @@ use std::{
 use crate::serde::{Log, LogOperation, Payload, serialize_entry};
 use crate::{ChannelMessage, DATA_DIR, Op};
 use anyhow::{Context, Result};
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc;
 
 /// Runs on a separate thread
-pub fn start_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
+pub fn start_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
@@ -48,7 +48,7 @@ pub fn start_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
             }
 
             match msg {
-                ChannelMessage::Append(m) => match m {
+                ChannelMessage::LogAppend(m) => match m {
                     Op::Delete(key) => {
                         let serialized_payload = serialize_entry(Log {
                             operation: LogOperation::Delete,
@@ -93,11 +93,12 @@ pub fn start_log_writer(mut rx: Receiver<ChannelMessage>) -> JoinHandle<()> {
                     }
                 },
                 ChannelMessage::ShutDown => {
-                    // cleanup
                     break;
                 }
             }
         }
+
+        println!("Shutting down log writer..");
     });
 
     handle

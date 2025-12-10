@@ -5,6 +5,7 @@ use tokio::{
     sync::{
         RwLock,
         mpsc::{self, Sender},
+        watch,
     },
 };
 use tonic::{Request, Response, Status};
@@ -74,7 +75,7 @@ impl Store for StoreService {
         let tx = self.w_tx.clone();
 
         let mut w = self.kv.write().await;
-        tx.send(ChannelMessage::Append(Op::Put(
+        tx.send(ChannelMessage::LogAppend(Op::Put(
             kv.0.clone(),
             kv.1.clone().into(),
         )))
@@ -98,7 +99,7 @@ impl Store for StoreService {
         if let Some(v) = w.get(&key) {
             match v {
                 Types::String(value) => {
-                    tx.send(ChannelMessage::Append(Op::Delete(key.clone())))
+                    tx.send(ChannelMessage::LogAppend(Op::Delete(key.clone())))
                         .await
                         .unwrap(); // append to log
                     w.delete(&key);
@@ -118,8 +119,9 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     println!("Cluster: {:#?}", cluster_config);
 
     let addr = cluster_config.self_address.clone();
+    let (s_tx, s_rx) = watch::channel::<Option<()>>(None);
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
-    let store_svc = StoreService::with_sender(tx);
+    let store_svc = StoreService::with_sender(tx.clone());
     let health_svc = HealthService::default();
 
     let lw_handle = start_log_writer(rx);
@@ -130,22 +132,80 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(HealthCheckServer::new(health_svc))
             .add_service(StoreServer::new(store_svc))
-            .serve(addr)
+            .serve_with_shutdown(addr, async {
+                match shutdown_server(tx, s_tx).await {
+                    Ok(_) => (),
+                    Err(e) => println!("Error while shutting down server: {:?}", e),
+                };
+            })
             .await
         {
             println!("Failed to start server: {:?}", e);
         }
     });
 
-    let peers_table = init_peers(&cluster_config.peers).await?;
-    let pt_arc = Arc::new(peers_table);
-    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc), rt.clone()).await;
+    let p_table = init_peers(&cluster_config.peers).await?;
+    let pt_arc = Arc::new(p_table);
+    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc), rt.clone(), s_rx.clone()).await;
 
     task.await.unwrap();
     if hb_handle.is_some() {
         hb_handle.unwrap().join().unwrap();
     }
     lw_handle.join().unwrap();
+    Ok(())
+}
+
+#[cfg(windows)]
+async fn shutdown_server(
+    lw_tx: mpsc::Sender<ChannelMessage>,
+    s_tx: watch::Sender<Option<()>>,
+) -> anyhow::Result<()> {
+    use tokio::signal;
+    let mut ctrlc = signal::windows::ctrl_c()?;
+    ctrlc.recv().await;
+    println!("Shutting down server...");
+
+    Ok(issue_shutdown(&lw_tx, &s_tx).await?)
+}
+
+#[cfg(unix)]
+async fn shutdown_server(
+    lw_tx: mpsc::Sender<ChannelMessage>,
+    s_tx: watch::Sender<Option<()>>,
+) -> anyhow::Result<()> {
+    use tokio::signal::unix::{SignalKind, signal};
+    let mut sig_term = signal(SignalKind::terminate())?;
+    let mut sig_hup = signal(SignalKind::hangup())?;
+    let mut sig_int = signal(SignalKind::interrupt())?;
+
+    let res = tokio::select! {
+        _ = sig_term.recv() => {
+            println!("Received SIGTERM. Shutting down..");
+            Ok(issue_shutdown(&lw_tx, &s_tx).await?)
+        }
+        _ = sig_hup.recv() => {
+            println!("Received SIGHUP. Shutting down..");
+            Ok(issue_shutdown(&lw_tx, &s_tx).await?)
+        }
+        _ = sig_int.recv() => {
+            println!("Received SIGINT. Shutting down..");
+            Ok(issue_shutdown(&lw_tx, &s_tx).await?)
+        }
+    };
+
+    res
+}
+
+async fn issue_shutdown(
+    lw_tx: &mpsc::Sender<ChannelMessage>,
+    s_tx: &watch::Sender<Option<()>>,
+) -> anyhow::Result<()> {
+    lw_tx.send(ChannelMessage::ShutDown).await?; // shutdown log writer
+    if let Err(e) = s_tx.send(Some(())) {
+        println!("Failed to send shutdown message: {:?}", e);
+    };
+
     Ok(())
 }
 

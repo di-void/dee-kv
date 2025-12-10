@@ -12,7 +12,7 @@ pub enum Op {
 }
 
 pub enum ChannelMessage {
-    Append(Op),
+    LogAppend(Op),
     ShutDown,
 }
 
