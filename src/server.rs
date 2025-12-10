@@ -121,13 +121,14 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     let addr = cluster_config.self_address.clone();
     let (s_tx, s_rx) = watch::channel::<Option<()>>(None);
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
-    let store_svc = StoreService::with_sender(tx.clone());
-    let health_svc = HealthService::default();
 
     let lw_handle = start_log_writer(rx);
 
     let task = tokio::spawn(async move {
         println!("Server is listening on {addr}");
+
+        let store_svc = StoreService::with_sender(tx.clone());
+        let health_svc = HealthService::default();
 
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(HealthCheckServer::new(health_svc))

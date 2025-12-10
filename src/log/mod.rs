@@ -92,9 +92,7 @@ pub fn start_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()
                         );
                     }
                 },
-                ChannelMessage::ShutDown => {
-                    break;
-                }
+                ChannelMessage::ShutDown => break,
             }
         }
 
