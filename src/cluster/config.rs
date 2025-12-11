@@ -54,6 +54,8 @@ pub fn parse_cluster_config(
         cluster_name,
         nodes,
     } = cluster_config;
+
+    let quorom = ((nodes.len() / 2) + 1) as u8;
     let mut peers: Vec<Node> = vec![];
     let mut self_id: u8 = 0;
     let mut self_address: String = String::from("");
@@ -73,6 +75,7 @@ pub fn parse_cluster_config(
         self_id,
         self_address,
         peers,
+        quorom,
     })
 }
 
@@ -101,11 +104,12 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
                     id: n.id,
                     last_ping: Instant::now(),
                     status: PeerStatus::Alive,
+                    role: Default::default(),
                 };
 
                 println!(
-                    "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?} }}",
-                    peer.id, &peer.last_ping, &peer.status
+                    "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?}, state: {:?} }}",
+                    peer.id, &peer.last_ping, &peer.status, &peer.role
                 );
 
                 let peer = Arc::new(Mutex::new(peer));
@@ -123,11 +127,12 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
                         id: n.id,
                         last_ping: Instant::now(),
                         status: PeerStatus::Alive,
+                        role: Default::default(),
                     };
 
                     println!(
-                        "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?} }}",
-                        peer.id, &peer.last_ping, &peer.status
+                        "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?}, state: {:?} }}",
+                        peer.id, &peer.last_ping, &peer.status, &peer.role
                     );
 
                     let peer = Arc::new(Mutex::new(peer));

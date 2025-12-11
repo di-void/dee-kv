@@ -1,140 +1,39 @@
 use std::sync::Arc;
-
 use tokio::{
     runtime::Handle,
-    sync::{
-        RwLock,
-        mpsc::{self, Sender},
-        watch,
-    },
+    sync::{mpsc, watch},
 };
-use tonic::{Request, Response, Status};
 
-use crate::health_proto::{
-    PingReply, PingRequest,
-    health_check_server::{HealthCheck, HealthCheckServer},
-};
-use crate::store_proto::{
-    DeleteReply, GetReply, KeyRequest, PutReply, PutRequest,
-    store_server::{Store, StoreServer},
+use crate::{
+    ChannelMessage,
+    cluster::{Cluster, config::init_peers, hearbeats::health::start_heartbeat_loop},
+    log::init_log_writer,
 };
 use crate::{
-    ChannelMessage, Op,
-    cluster::{config::init_peers, hearbeats::health::start_heartbeat_loop},
-    log::init_log_writer,
-    store::{Store as KV, Types},
+    health_proto::health_check_server::HealthCheckServer,
+    services::{health::HealthService, store::StoreService},
+    store_proto::store_server::StoreServer,
 };
 
-struct StoreService {
-    kv: RwLock<KV>, // in-mem kv
-    w_tx: Sender<ChannelMessage>,
-}
-
-#[derive(Default)]
-struct HealthService {}
-
-#[tonic::async_trait]
-impl HealthCheck for HealthService {
-    async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingReply>, Status> {
-        println!("Received Ping Request. Sending reply..");
-        Ok(Response::new(PingReply {}))
-    }
-}
-
-impl StoreService {
-    fn with_sender(tx: Sender<ChannelMessage>) -> Self {
-        Self {
-            kv: Default::default(),
-            w_tx: tx,
-        }
-    }
-}
-
-#[tonic::async_trait]
-impl Store for StoreService {
-    async fn get(&self, request: Request<KeyRequest>) -> Result<Response<GetReply>, Status> {
-        let msg = request.into_inner();
-        let key = msg.key;
-
-        let r = self.kv.read().await;
-        let value = r.get(&key);
-        if let Some(v) = value {
-            match v {
-                Types::String(s) => Ok(Response::new(GetReply { key, value: s })),
-            }
-        } else {
-            Err(Status::invalid_argument(format!(
-                "Key: '{key}' doesn't exist"
-            )))
-        }
-    }
-
-    async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutReply>, Status> {
-        let msg = request.into_inner();
-        let kv = (msg.key, msg.value);
-        let tx = self.w_tx.clone();
-
-        let mut w = self.kv.write().await;
-        tx.send(ChannelMessage::LogAppend(Op::Put(
-            kv.0.clone(),
-            kv.1.clone().into(),
-        )))
-        .await
-        .unwrap(); // append to log
-
-        w.set((&kv.0, kv.1.clone().into()));
-
-        Ok(Response::new(PutReply {
-            key: kv.0,
-            value: kv.1,
-        }))
-    }
-
-    async fn delete(&self, request: Request<KeyRequest>) -> Result<Response<DeleteReply>, Status> {
-        let msg = request.into_inner();
-        let key = msg.key;
-        let tx = self.w_tx.clone();
-
-        let mut w = self.kv.write().await;
-        if let Some(v) = w.get(&key) {
-            match v {
-                Types::String(value) => {
-                    tx.send(ChannelMessage::LogAppend(Op::Delete(key.clone())))
-                        .await
-                        .unwrap(); // append to log
-                    w.delete(&key);
-                    Ok(Response::new(DeleteReply { key, value }))
-                }
-            }
-        } else {
-            Err(Status::invalid_argument(format!(
-                "Key: '{key}' doesn't exist"
-            )))
-        }
-    }
-}
-
-use crate::cluster::Cluster;
 pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
-    println!("Cluster: {:#?}", cluster_config);
+    println!("{:#?}", cluster_config);
 
     let addr = cluster_config.self_address.clone();
-    let (s_tx, s_rx) = watch::channel::<Option<()>>(None);
-    let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
-
-    let lw_handle = init_log_writer(rx);
+    let (s_tx, shutdown) = watch::channel::<Option<()>>(None);
 
     let task = tokio::spawn(async move {
         println!("Server is listening on {addr}");
+        let (lw_tx, lw_rx) = mpsc::channel::<ChannelMessage>(5);
+        let lw_handle = init_log_writer(lw_rx);
 
-        let store_svc = StoreService::with_sender(tx.clone());
+        let store_svc = StoreService::with_log_writer(lw_tx.clone());
         let health_svc = HealthService::default();
 
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(HealthCheckServer::new(health_svc))
             .add_service(StoreServer::new(store_svc))
             .serve_with_shutdown(addr, async {
-                match shutdown_server(tx, s_tx).await {
+                match shutdown_server(lw_tx, s_tx).await {
                     Ok(_) => (),
                     Err(e) => println!("Error while shutting down server: {:?}", e),
                 };
@@ -143,17 +42,18 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
         {
             println!("Failed to start server: {:?}", e);
         }
+
+        lw_handle
     });
 
     let p_table = init_peers(&cluster_config.peers).await?;
-    let pt_arc = Arc::new(p_table);
-    let hb_handle = start_heartbeat_loop(Arc::clone(&pt_arc), rt.clone(), s_rx.clone()).await;
+    let p_table = Arc::new(p_table);
+    let hb_handle = start_heartbeat_loop(Arc::clone(&p_table), rt.clone(), shutdown.clone()).await;
 
-    task.await.unwrap();
+    task.await.unwrap().join().unwrap();
     if hb_handle.is_some() {
         hb_handle.unwrap().join().unwrap();
     }
-    lw_handle.join().unwrap();
     Ok(())
 }
 

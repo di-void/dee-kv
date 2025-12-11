@@ -1,4 +1,5 @@
 pub mod config;
+mod consensus;
 pub mod hearbeats;
 use std::net::SocketAddr;
 
@@ -25,6 +26,7 @@ pub struct Cluster {
     pub self_id: u8,
     pub self_address: SocketAddr,
     pub peers: Vec<Node>,
+    pub quorom: u8,
 }
 
 #[derive(Debug)]
@@ -34,12 +36,27 @@ pub enum PeerStatus {
 }
 
 #[derive(Debug)]
+pub enum NodeRole {
+    Follower,
+    Candidate,
+    Leader,
+}
+
+impl Default for NodeRole {
+    fn default() -> Self {
+        NodeRole::Follower
+    }
+}
+
+#[derive(Debug)]
 pub struct Peer {
     id: u8,
     status: PeerStatus,
+    role: NodeRole,
     last_ping: std::time::Instant,
     client: HealthCheckClient<Channel>,
 }
 
 pub const HEARTBEAT_INTERVAL_MS: u16 = 1000;
 pub const PEER_FAILURE_TIMEOUT_MS: u16 = 5000; // 5 secs
+pub const LEADER_HEARTBEAT_INTERVAL_MS: u8 = 50;

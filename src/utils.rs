@@ -36,3 +36,9 @@ pub mod env {
         Ok(cli_args)
     }
 }
+
+pub mod cluster {
+    pub fn get_random_timeout() -> u16 {
+        150
+    }
+}
