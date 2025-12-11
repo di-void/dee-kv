@@ -19,7 +19,7 @@ use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 
 /// Runs on a separate thread
-pub fn start_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()> {
+pub fn init_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {

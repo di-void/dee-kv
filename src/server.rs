@@ -20,8 +20,8 @@ use crate::store_proto::{
 };
 use crate::{
     ChannelMessage, Op,
-    cluster::health::{init_peers, start_heartbeat_loop},
-    log::start_log_writer,
+    cluster::{config::init_peers, hearbeats::health::start_heartbeat_loop},
+    log::init_log_writer,
     store::{Store as KV, Types},
 };
 
@@ -122,7 +122,7 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     let (s_tx, s_rx) = watch::channel::<Option<()>>(None);
     let (tx, rx) = mpsc::channel::<ChannelMessage>(5);
 
-    let lw_handle = start_log_writer(rx);
+    let lw_handle = init_log_writer(rx);
 
     let task = tokio::spawn(async move {
         println!("Server is listening on {addr}");

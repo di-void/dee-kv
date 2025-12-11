@@ -1,5 +1,5 @@
 pub mod config;
-pub mod health;
+pub mod hearbeats;
 use std::net::SocketAddr;
 
 use serde::Deserialize;

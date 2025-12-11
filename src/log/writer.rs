@@ -73,9 +73,7 @@ impl LogWriter {
 
                     file = fh;
                 }
-                CheckStatus::Over(fh) => {
-                    file = fh;
-                }
+                CheckStatus::Over(fh) => file = fh,
             }
 
             Ok(Self {
