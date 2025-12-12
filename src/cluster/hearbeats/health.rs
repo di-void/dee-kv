@@ -1,6 +1,7 @@
 use crate::{
-    cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS, Peer, PeerStatus},
-    health_proto::PingRequest,
+    cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS, Peer, PeerStatus, PeersTable},
+    health_proto::{PingRequest, health_check_client::HealthCheckClient},
+    services::health::init_health_clients,
 };
 use anyhow::Result;
 use std::{
@@ -8,24 +9,22 @@ use std::{
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tokio::{
-    runtime::Handle,
-    sync::{Mutex, watch},
-    time::timeout,
-};
+use tokio::{runtime::Handle, sync::watch, time::timeout};
 use tonic::Request;
 
 pub async fn start_heartbeat_loop(
-    peers_table: Arc<Vec<Arc<Mutex<Peer>>>>,
+    pt: Arc<PeersTable>,
     rt: Handle,
     shutdown_rx: watch::Receiver<Option<()>>,
 ) -> Option<JoinHandle<()>> {
     println!("Starting heartbeat loop...");
 
-    if peers_table.len() == 0 {
+    if pt.len() == 0 {
         println!("Heartbeat loop aborted. No peers found in peers_table");
         return None;
     }
+
+    let _clients = init_health_clients(Arc::clone(&pt));
 
     let h = thread::spawn(move || {
         let _guard = rt.enter();
@@ -36,7 +35,7 @@ pub async fn start_heartbeat_loop(
                 break;
             }
 
-            for p in peers_table.iter() {
+            for p in pt.iter() {
                 let peer = Arc::clone(p);
 
                 // only spawn with lock
@@ -91,6 +90,7 @@ pub async fn start_heartbeat_loop(
 
 async fn timed_ping_request(peer: &mut Peer, period: Duration) -> Result<()> {
     let req = Request::new(PingRequest {});
-    let _r = timeout(period, peer.client.ping(req)).await??;
+    let mut client = HealthCheckClient::new(peer.client.clone());
+    let _r = timeout(period, client.ping(req)).await??;
     Ok(())
 }

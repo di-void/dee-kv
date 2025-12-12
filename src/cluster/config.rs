@@ -1,11 +1,7 @@
+use super::{Cluster, ClusterConfig, Node, Peer, PeerStatus, PeersTable};
+use crate::{LOCAL_HOST_IPV4, LOOPBACK_NET_INT_STRING, WILDCARD_IPV4, WILDCARD_NET_INT_STRING};
 use anyhow::{Context, Error, Result};
 
-use crate::{
-    LOCAL_HOST_IPV4, LOOPBACK_NET_INT_STRING, WILDCARD_IPV4, WILDCARD_NET_INT_STRING,
-    health_proto::health_check_client::HealthCheckClient,
-};
-
-use super::{Cluster, ClusterConfig, Node, Peer, PeerStatus};
 use std::{
     collections::HashMap,
     fs,
@@ -15,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex, time::sleep};
-use tonic::transport::{Channel, Uri};
+use tonic::transport::{Channel, Endpoint, Uri};
 
 pub fn parse_cluster_config(
     cli_args: HashMap<String, String>,
@@ -91,7 +87,7 @@ fn parse_and_normalize_addr(addr: String, net_int: &str) -> Result<SocketAddr> {
     Ok(format!("{ip}:{port}").parse::<SocketAddr>()?)
 }
 
-pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
+pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<PeersTable> {
     let mut peers = vec![];
 
     for n in p_nodes.iter() {
@@ -147,7 +143,7 @@ pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<Vec<Arc<Mutex<Peer>>>> {
     Ok(peers)
 }
 
-async fn retry_create_client(addr: &str) -> Result<HealthCheckClient<Channel>> {
+async fn retry_create_client(addr: &str) -> Result<Channel> {
     for i in 1..=3 {
         println!("Retry attempt: {i}");
         if let Ok(client) = create_client(addr).await {
@@ -161,13 +157,15 @@ async fn retry_create_client(addr: &str) -> Result<HealthCheckClient<Channel>> {
     Err(Error::msg("Failed to init client with address: {addr}"))
 }
 
-async fn create_client(addr: &str) -> Result<HealthCheckClient<Channel>> {
+async fn create_client(addr: &str) -> Result<Channel> {
     let mut parts = http::uri::Parts::default();
     parts.scheme = Some("http".parse().unwrap());
     parts.authority = Some(addr.parse().unwrap());
     parts.path_and_query = Some("/".parse().unwrap());
-
     let uri = Uri::from_parts(parts).unwrap();
-    let c = HealthCheckClient::connect(uri).await?;
-    Ok(c)
+
+    let builder = Endpoint::from_shared(uri.to_string())?;
+    Ok(builder
+        .connect_timeout(Duration::from_secs(5))
+        .connect_lazy())
 }

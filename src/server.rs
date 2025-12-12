@@ -21,7 +21,7 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     let addr = cluster_config.self_address.clone();
     let (s_tx, shutdown) = watch::channel::<Option<()>>(None);
 
-    let task = tokio::spawn(async move {
+    let server_handle = tokio::spawn(async move {
         println!("Server is listening on {addr}");
         let (lw_tx, lw_rx) = mpsc::channel::<ChannelMessage>(5);
         let lw_handle = init_log_writer(lw_rx);
@@ -50,7 +50,7 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
     let p_table = Arc::new(p_table);
     let hb_handle = start_heartbeat_loop(Arc::clone(&p_table), rt.clone(), shutdown.clone()).await;
 
-    task.await.unwrap().join().unwrap();
+    server_handle.await.unwrap().join().unwrap();
     if hb_handle.is_some() {
         hb_handle.unwrap().join().unwrap();
     }

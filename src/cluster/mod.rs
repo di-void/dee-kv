@@ -1,12 +1,11 @@
 pub mod config;
 mod consensus;
 pub mod hearbeats;
-use std::net::SocketAddr;
 
 use serde::Deserialize;
+use std::{net::SocketAddr, sync::Arc};
+use tokio::sync::Mutex;
 use tonic::transport::Channel;
-
-use crate::health_proto::health_check_client::HealthCheckClient;
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Node {
@@ -35,6 +34,25 @@ pub enum PeerStatus {
     Dead,
 }
 
+pub struct CurrentNode {
+    id: u8,
+    term: u16,
+    role: NodeRole,
+    votes: u8,
+}
+
+impl CurrentNode {
+    // pub fn is_leader(&self) -> bool {
+    //     self.role == NodeRole::Leader
+    // }
+    // pub fn is_candidate(&self) -> bool {
+    //     self.role == NodeRole::Candidate
+    // }
+    pub fn reset_role(&mut self) {
+        self.role = Default::default();
+    }
+}
+
 #[derive(Debug)]
 pub enum NodeRole {
     Follower,
@@ -50,12 +68,14 @@ impl Default for NodeRole {
 
 #[derive(Debug)]
 pub struct Peer {
-    id: u8,
-    status: PeerStatus,
-    role: NodeRole,
-    last_ping: std::time::Instant,
-    client: HealthCheckClient<Channel>,
+    pub id: u8,
+    pub role: NodeRole,
+    pub status: PeerStatus,
+    pub last_ping: std::time::Instant,
+    pub client: Channel,
 }
+
+pub type PeersTable = Vec<Arc<Mutex<Peer>>>;
 
 pub const HEARTBEAT_INTERVAL_MS: u16 = 1000;
 pub const PEER_FAILURE_TIMEOUT_MS: u16 = 5000; // 5 secs

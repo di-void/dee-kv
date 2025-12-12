@@ -5,6 +5,7 @@ fn main() {
         .unwrap();
 
     tonic_prost_build::compile_protos("proto/health.proto").unwrap();
+    // tonic_prost_build::compile_protos("proto/consensus.proto").unwrap();
 }
 
 // https://docs.rs/tonic-build/0.14.2/tonic_build/

@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package consensus;
+
+message LeaderAssertRequest {}
+message LeaderAssertReply {}
+
+message RequestVoteRequest {}
+message RequestVoteReply {}
+
+// raft
+service Consensus {
+  rpc LeaderAssert() returns ();
+  rpc RequestVote() returns ();
+}
+
+// https://protobuf.dev/programming-guides/proto3/
