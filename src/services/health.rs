@@ -1,13 +1,10 @@
-use std::sync::Arc;
-
 use crate::{
-    cluster::{Peer, PeersTable},
     health_proto::{
         PingReply, PingRequest, health_check_client::HealthCheckClient,
         health_check_server::HealthCheck,
     },
+    services::GrpcClientWrapper,
 };
-use tokio::sync::Mutex;
 use tonic::{Request, Response, Status, transport::Channel};
 
 #[derive(Default)]
@@ -21,19 +18,8 @@ impl HealthCheck for HealthService {
     }
 }
 
-pub fn init_health_clients(
-    pt: Arc<PeersTable>,
-) -> Vec<(HealthCheckClient<Channel>, Arc<Mutex<Peer>>)> {
-    let cp = pt
-        .iter()
-        .map(|p| {
-            let guard = p.blocking_lock();
-            let client = HealthCheckClient::new(guard.client.clone());
-            drop(guard);
-
-            (client, Arc::clone(p))
-        })
-        .collect();
-
-    cp
+impl GrpcClientWrapper for HealthCheckClient<Channel> {
+    fn new_client(inner: Channel) -> Self {
+        Self::new(inner)
+    }
 }

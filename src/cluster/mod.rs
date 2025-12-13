@@ -1,5 +1,5 @@
 pub mod config;
-mod consensus;
+pub mod consensus;
 pub mod hearbeats;
 
 use serde::Deserialize;
@@ -35,10 +35,11 @@ pub enum PeerStatus {
 }
 
 pub struct CurrentNode {
-    id: u8,
-    term: u16,
-    role: NodeRole,
-    votes: u8,
+    pub id: u8,
+    pub term: u16,
+    pub role: NodeRole,
+    pub votes: u8,
+    pub has_voted: bool,
 }
 
 impl CurrentNode {

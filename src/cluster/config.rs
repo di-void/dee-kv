@@ -87,7 +87,7 @@ fn parse_and_normalize_addr(addr: String, net_int: &str) -> Result<SocketAddr> {
     Ok(format!("{ip}:{port}").parse::<SocketAddr>()?)
 }
 
-pub async fn init_peers(p_nodes: &Vec<Node>) -> Result<PeersTable> {
+pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
     let mut peers = vec![];
 
     for n in p_nodes.iter() {

@@ -1,30 +1,26 @@
-use std::sync::Arc;
 use tokio::{
-    runtime::Handle,
     sync::{mpsc, watch},
+    task::JoinHandle,
 };
 
-use crate::{
-    ChannelMessage,
-    cluster::{Cluster, config::init_peers, hearbeats::health::start_heartbeat_loop},
-    log::init_log_writer,
-};
+use crate::{ChannelMessage, cluster::Cluster};
 use crate::{
     health_proto::health_check_server::HealthCheckServer,
     services::{health::HealthService, store::StoreService},
     store_proto::store_server::StoreServer,
 };
 
-pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
+pub async fn start(
+    cluster_config: &Cluster,
+    lw_tx: mpsc::Sender<ChannelMessage>,
+    sd_tx: watch::Sender<Option<()>>,
+) -> anyhow::Result<JoinHandle<()>> {
     println!("{:#?}", cluster_config);
 
     let addr = cluster_config.self_address.clone();
-    let (s_tx, shutdown) = watch::channel::<Option<()>>(None);
 
-    let server_handle = tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         println!("Server is listening on {addr}");
-        let (lw_tx, lw_rx) = mpsc::channel::<ChannelMessage>(5);
-        let lw_handle = init_log_writer(lw_rx);
 
         let store_svc = StoreService::with_log_writer(lw_tx.clone());
         let health_svc = HealthService::default();
@@ -33,7 +29,7 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
             .add_service(HealthCheckServer::new(health_svc))
             .add_service(StoreServer::new(store_svc))
             .serve_with_shutdown(addr, async {
-                match shutdown_server(lw_tx, s_tx).await {
+                match shutdown_server(lw_tx, sd_tx).await {
                     Ok(_) => (),
                     Err(e) => println!("Error while shutting down server: {:?}", e),
                 };
@@ -42,19 +38,9 @@ pub async fn start(cluster_config: Cluster, rt: &Handle) -> anyhow::Result<()> {
         {
             println!("Failed to start server: {:?}", e);
         }
-
-        lw_handle
     });
 
-    let p_table = init_peers(&cluster_config.peers).await?;
-    let p_table = Arc::new(p_table);
-    let hb_handle = start_heartbeat_loop(Arc::clone(&p_table), rt.clone(), shutdown.clone()).await;
-
-    server_handle.await.unwrap().join().unwrap();
-    if hb_handle.is_some() {
-        hb_handle.unwrap().join().unwrap();
-    }
-    Ok(())
+    Ok(handle)
 }
 
 #[cfg(windows)]

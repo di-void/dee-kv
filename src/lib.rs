@@ -1,5 +1,5 @@
 pub mod cluster;
-mod log;
+pub mod log;
 mod serde;
 pub mod server;
 pub mod services;
