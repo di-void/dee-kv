@@ -76,6 +76,8 @@ pub async fn start_heartbeat_loop(
                             }
                         };
                     });
+                } else {
+                    println!("Peer {:?} is currently locked! Skipping ping.", p);
                 };
             }
 

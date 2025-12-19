@@ -38,23 +38,43 @@ pub struct CurrentNode {
     pub id: u8,
     pub term: u16,
     pub role: NodeRole,
-    pub votes: u8,
+    pub votes: (u16, u8), // (term, nVotes)
     pub has_voted: bool,
 }
 
 impl CurrentNode {
-    // pub fn is_leader(&self) -> bool {
-    //     self.role == NodeRole::Leader
-    // }
-    // pub fn is_candidate(&self) -> bool {
-    //     self.role == NodeRole::Candidate
-    // }
-    pub fn reset_role(&mut self) {
+    pub fn new() {
+        //
+    }
+    pub fn is_follower(&self) -> bool {
+        self.role == NodeRole::Follower
+    }
+    pub fn step_down(&mut self, term: u16) {
+        self.term = term;
         self.role = Default::default();
+    }
+    pub fn promote(&mut self) {
+        // check the current node's role
+        match self.role {
+            NodeRole::Follower => {
+                self.role = NodeRole::Candidate;
+                self.term += 1;
+                self.votes = (self.term, 1);
+                self.has_voted = true;
+            }
+            NodeRole::Candidate => {
+                self.role = NodeRole::Leader;
+                self.votes = (self.term, 0); // reset votes
+                self.has_voted = false;
+            }
+            _ => {
+                dbg!("Cannot promote a Leader! Current node is already a Leader");
+            }
+        };
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, PartialOrd)]
 pub enum NodeRole {
     Follower,
     Candidate,

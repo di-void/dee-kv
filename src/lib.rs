@@ -17,6 +17,11 @@ pub enum ChannelMessage {
     ShutDown,
 }
 
+pub enum ConsensusMessage {
+    LeaderAssert,
+    Init,
+}
+
 pub mod store_proto {
     tonic::include_proto!("store");
 }

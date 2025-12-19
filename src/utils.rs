@@ -37,8 +37,16 @@ pub mod env {
     }
 }
 
+use std::ops::Range;
+pub fn get_random_value(range: Range<u16>) -> u16 {
+    rand::random_range(range)
+}
+
 pub mod cluster {
-    pub fn get_random_timeout() -> u16 {
-        150
+    use std::time::Duration;
+
+    pub fn get_random_election_timeout() -> Duration {
+        let val = super::get_random_value(150..301);
+        Duration::from_millis(val.into())
     }
 }
