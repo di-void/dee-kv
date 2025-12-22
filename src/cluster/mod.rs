@@ -3,9 +3,9 @@ pub mod consensus;
 pub mod hearbeats;
 
 use serde::Deserialize;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
-use tonic::transport::Channel;
+use tonic::transport::{Channel, Endpoint, Uri};
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Node {
@@ -87,13 +87,46 @@ impl Default for NodeRole {
     }
 }
 
+struct ChannelBuilder {
+    endpoint: Endpoint,
+}
+
+impl ChannelBuilder {
+    fn from_addr(addr: &str) -> anyhow::Result<Self> {
+        let mut parts = http::uri::Parts::default();
+        parts.scheme = Some("http".parse().unwrap());
+        parts.authority = Some(addr.parse().unwrap());
+        parts.path_and_query = Some("/".parse().unwrap());
+        let uri = Uri::from_parts(parts).unwrap();
+
+        let endpoint = Endpoint::from_shared(uri.to_string())?;
+        Ok(Self { endpoint })
+    }
+
+    pub async fn create_channel(&self) -> anyhow::Result<Channel> {
+        Ok(self
+            .endpoint
+            .clone()
+            .connect_timeout(Duration::from_secs(5))
+            .connect()
+            .await?)
+    }
+
+    pub fn create_lazy_channel(&self) -> Channel {
+        self.endpoint
+            .clone()
+            .connect_timeout(Duration::from_secs(5))
+            .connect_lazy()
+    }
+}
+
 #[derive(Debug)]
 pub struct Peer {
     pub id: u8,
     pub role: NodeRole,
     pub status: PeerStatus,
     pub last_ping: std::time::Instant,
-    pub client: Channel,
+    pub channel: Channel,
 }
 
 pub type PeersTable = Vec<Arc<Mutex<Peer>>>;

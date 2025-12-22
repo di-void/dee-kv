@@ -26,6 +26,7 @@ fn main() -> anyhow::Result<()> {
         let server_handle = server::start(&cluster, lw_tx.clone(), shd_tx.clone()).await;
         match server_handle {
             Ok(s) => {
+                // start dead/alive pings
                 let _ = consensus::begin(
                     &cluster,
                     (lw_tx.clone(), shd_rx.clone(), csus_rx.clone()),

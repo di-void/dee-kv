@@ -92,7 +92,7 @@ pub async fn start_heartbeat_loop(
 
 async fn timed_ping_request(peer: &mut Peer, period: Duration) -> Result<()> {
     let req = Request::new(PingRequest {});
-    let mut client = HealthCheckServiceClient::new(peer.client.clone());
+    let mut client = HealthCheckServiceClient::new(peer.channel.clone());
     let _r = timeout(period, client.ping(req)).await??;
     Ok(())
 }

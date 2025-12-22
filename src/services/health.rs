@@ -3,10 +3,6 @@ use crate::{
         PingRequest, PingResponse, health_check_service_client::HealthCheckServiceClient,
         health_check_service_server::HealthCheckService as HealthCheckSvc,
     },
-    // health_proto::{
-    //     PingReply, PingRequest, health_check_client::HealthCheckClient,
-    //     health_check_server::HealthCheck,
-    // },
     services::GrpcClientWrapper,
 };
 use tonic::{Request, Response, Status, transport::Channel};

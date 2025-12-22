@@ -17,7 +17,7 @@ pub fn create_custom_clients<C: GrpcClientWrapper>(
         .iter()
         .map(|p| {
             let guard = p.blocking_lock();
-            let client = C::new_client(guard.client.clone());
+            let client = C::new_client(guard.channel.clone());
             drop(guard);
 
             (Mutex::new(client), Arc::clone(p))

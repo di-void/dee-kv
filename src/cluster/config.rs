@@ -1,4 +1,4 @@
-use super::{Cluster, ClusterConfig, Node, Peer, PeerStatus, PeersTable};
+use super::{ChannelBuilder, Cluster, ClusterConfig, Node, Peer, PeerStatus, PeersTable};
 use crate::{LOCAL_HOST_IPV4, LOOPBACK_NET_INT_STRING, WILDCARD_IPV4, WILDCARD_NET_INT_STRING};
 use anyhow::{Context, Error, Result};
 
@@ -11,7 +11,6 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{sync::Mutex, time::sleep};
-use tonic::transport::{Channel, Endpoint, Uri};
 
 pub fn parse_cluster_config(
     cli_args: HashMap<String, String>,
@@ -91,12 +90,13 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
     let mut peers = vec![];
 
     for n in p_nodes.iter() {
-        let peer: Peer;
+        let mut peer: Peer;
+        let builder = ChannelBuilder::from_addr(&n.address)?;
 
-        match create_client(&n.address).await {
-            Ok(client) => {
+        match builder.create_channel().await {
+            Ok(channel) => {
                 peer = Peer {
-                    client,
+                    channel,
                     id: n.id,
                     last_ping: Instant::now(),
                     status: PeerStatus::Alive,
@@ -113,59 +113,35 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
             }
             Err(e) => {
                 println!(
-                    "Failed to initialize client with id: {}. Error: {:?}\n Retrying...",
+                    "Failed to create channel for Node: {}. Error: {:?}\n Defaulting to lazy channel and retrying...",
                     n.id, e
                 );
 
-                if let Ok(client) = retry_create_client(&n.address).await {
-                    peer = Peer {
-                        client,
-                        id: n.id,
-                        last_ping: Instant::now(),
-                        status: PeerStatus::Alive,
-                        role: Default::default(),
-                    };
+                peer = Peer {
+                    id: n.id,
+                    last_ping: Instant::now(),
+                    status: PeerStatus::Dead,
+                    role: Default::default(),
+                    channel: builder.create_lazy_channel(),
+                };
 
-                    println!(
-                        "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?}, state: {:?} }}",
-                        peer.id, &peer.last_ping, &peer.status, &peer.role
-                    );
+                for i in 1..=3 {
+                    println!("Retry attempt: {i}");
+                    if let Ok(channel) = builder.create_channel().await {
+                        peer.channel = channel;
+                        peer.last_ping = Instant::now();
+                        peer.status = PeerStatus::Alive;
+                    }
 
-                    let peer = Arc::new(Mutex::new(peer));
-                    peers.push(peer);
-                } else {
-                    println!("Failed to initialize client after 4 attempts. Skipping init step")
+                    println!("Failed to create channel. Trying again in 2 secs.");
+                    sleep(Duration::from_millis(2000)).await
                 }
+
+                let peer = Arc::new(Mutex::new(peer));
+                peers.push(peer);
             }
-        };
+        }
     }
 
     Ok(peers)
-}
-
-async fn retry_create_client(addr: &str) -> Result<Channel> {
-    for i in 1..=3 {
-        println!("Retry attempt: {i}");
-        if let Ok(client) = create_client(addr).await {
-            return Ok(client);
-        }
-
-        println!("Failed to init client. Trying again in 2 secs.");
-        sleep(Duration::from_millis(2000)).await
-    }
-
-    Err(Error::msg("Failed to init client with address: {addr}"))
-}
-
-async fn create_client(addr: &str) -> Result<Channel> {
-    let mut parts = http::uri::Parts::default();
-    parts.scheme = Some("http".parse().unwrap());
-    parts.authority = Some(addr.parse().unwrap());
-    parts.path_and_query = Some("/".parse().unwrap());
-    let uri = Uri::from_parts(parts).unwrap();
-
-    let builder = Endpoint::from_shared(uri.to_string())?;
-    Ok(builder
-        .connect_timeout(Duration::from_secs(5))
-        .connect_lazy())
 }
