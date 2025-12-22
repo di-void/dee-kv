@@ -2,9 +2,11 @@ syntax = "proto3";
 
 package store;
 
-message KeyRequest { string key = 1; }
+message KeyRequest {
+  string key = 1;
+}
 
-message GetReply {
+message GetResponse {
   string key = 1;
   string value = 2;
 }
@@ -14,21 +16,21 @@ message PutRequest {
   string value = 2;
 }
 
-message PutReply {
+message PutResponse {
   string key = 1;
   string value = 2;
 }
 
-message DeleteReply {
+message DeleteResponse {
   string key = 1;
   string value = 2;
 }
 
-service Store {
-  rpc Get(KeyRequest) returns (GetReply);
+service StoreService {
+  rpc Get(KeyRequest) returns (GetResponse);
   // add or overwrite
-  rpc Put(PutRequest) returns (PutReply);
-  rpc Delete(KeyRequest) returns (DeleteReply);
+  rpc Put(PutRequest) returns (PutResponse);
+  rpc Delete(KeyRequest) returns (DeleteResponse);
 }
 
 // https://protobuf.dev/programming-guides/proto3/

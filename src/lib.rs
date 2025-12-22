@@ -25,9 +25,11 @@ pub enum ConsensusMessage {
 pub mod store_proto {
     tonic::include_proto!("store");
 }
-
 pub mod health_proto {
     tonic::include_proto!("health");
+}
+pub mod consensus_proto {
+    tonic::include_proto!("consensus");
 }
 
 pub const DATA_DIR: &str = "./DATA";

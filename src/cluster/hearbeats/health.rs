@@ -1,6 +1,6 @@
 use crate::{
     cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS, Peer, PeerStatus, PeersTable},
-    health_proto::{PingRequest, health_check_client::HealthCheckClient},
+    health_proto::{PingRequest, health_check_service_client::HealthCheckServiceClient},
     services::create_custom_clients,
 };
 use anyhow::Result;
@@ -24,7 +24,7 @@ pub async fn start_heartbeat_loop(
         return None;
     }
 
-    let _clients = create_custom_clients::<HealthCheckClient<Channel>>(Arc::clone(&pt));
+    let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(Arc::clone(&pt));
 
     let h = thread::spawn(move || {
         let _guard = rt.enter();
@@ -92,7 +92,7 @@ pub async fn start_heartbeat_loop(
 
 async fn timed_ping_request(peer: &mut Peer, period: Duration) -> Result<()> {
     let req = Request::new(PingRequest {});
-    let mut client = HealthCheckClient::new(peer.client.clone());
+    let mut client = HealthCheckServiceClient::new(peer.client.clone());
     let _r = timeout(period, client.ping(req)).await??;
     Ok(())
 }

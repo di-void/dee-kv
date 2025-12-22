@@ -3,6 +3,8 @@ syntax = "proto3";
 package health;
 
 message PingRequest {}
-message PingReply {}
+message PingResponse {}
 
-service HealthCheck { rpc Ping(PingRequest) returns (PingReply); }
+service HealthCheckService {
+  rpc Ping(PingRequest) returns (PingResponse);
+}

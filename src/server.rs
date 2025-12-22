@@ -5,9 +5,9 @@ use tokio::{
 
 use crate::{ChannelMessage, cluster::Cluster};
 use crate::{
-    health_proto::health_check_server::HealthCheckServer,
-    services::{health::HealthService, store::StoreService},
-    store_proto::store_server::StoreServer,
+    health_proto::health_check_service_server::HealthCheckServiceServer,
+    services::{health::HealthCheckService, store::StoreService},
+    store_proto::store_service_server::StoreServiceServer,
 };
 
 pub async fn start(
@@ -23,11 +23,11 @@ pub async fn start(
         println!("Server is listening on {addr}");
 
         let store_svc = StoreService::with_log_writer(lw_tx.clone());
-        let health_svc = HealthService::default();
+        let health_svc = HealthCheckService::default();
 
         if let Err(e) = tonic::transport::Server::builder()
-            .add_service(HealthCheckServer::new(health_svc))
-            .add_service(StoreServer::new(store_svc))
+            .add_service(HealthCheckServiceServer::new(health_svc))
+            .add_service(StoreServiceServer::new(store_svc))
             .serve_with_shutdown(addr, async {
                 match shutdown_server(lw_tx, sd_tx).await {
                     Ok(_) => (),

@@ -1,24 +1,28 @@
 use crate::{
     health_proto::{
-        PingReply, PingRequest, health_check_client::HealthCheckClient,
-        health_check_server::HealthCheck,
+        PingRequest, PingResponse, health_check_service_client::HealthCheckServiceClient,
+        health_check_service_server::HealthCheckService as HealthCheckSvc,
     },
+    // health_proto::{
+    //     PingReply, PingRequest, health_check_client::HealthCheckClient,
+    //     health_check_server::HealthCheck,
+    // },
     services::GrpcClientWrapper,
 };
 use tonic::{Request, Response, Status, transport::Channel};
 
 #[derive(Default)]
-pub struct HealthService {}
+pub struct HealthCheckService {}
 
 #[tonic::async_trait]
-impl HealthCheck for HealthService {
-    async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingReply>, Status> {
+impl HealthCheckSvc for HealthCheckService {
+    async fn ping(&self, _r: Request<PingRequest>) -> Result<Response<PingResponse>, Status> {
         println!("Received Ping Request. Sending reply..");
-        Ok(Response::new(PingReply {}))
+        Ok(Response::new(PingResponse {}))
     }
 }
 
-impl GrpcClientWrapper for HealthCheckClient<Channel> {
+impl GrpcClientWrapper for HealthCheckServiceClient<Channel> {
     fn new_client(inner: Channel) -> Self {
         Self::new(inner)
     }

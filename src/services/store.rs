@@ -1,5 +1,6 @@
 use crate::store_proto::{
-    DeleteReply, GetReply, KeyRequest, PutReply, PutRequest, store_server::Store,
+    DeleteResponse, GetResponse, KeyRequest, PutRequest, PutResponse,
+    store_service_server::StoreService as StoreSvc,
 };
 use crate::{
     ChannelMessage, Op,
@@ -23,8 +24,8 @@ impl StoreService {
 }
 
 #[tonic::async_trait]
-impl Store for StoreService {
-    async fn get(&self, request: Request<KeyRequest>) -> Result<Response<GetReply>, Status> {
+impl StoreSvc for StoreService {
+    async fn get(&self, request: Request<KeyRequest>) -> Result<Response<GetResponse>, Status> {
         let msg = request.into_inner();
         let key = msg.key;
 
@@ -32,7 +33,7 @@ impl Store for StoreService {
         let value = r.get(&key);
         if let Some(v) = value {
             match v {
-                Types::String(s) => Ok(Response::new(GetReply { key, value: s })),
+                Types::String(s) => Ok(Response::new(GetResponse { key, value: s })),
             }
         } else {
             Err(Status::invalid_argument(format!(
@@ -41,7 +42,7 @@ impl Store for StoreService {
         }
     }
 
-    async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutReply>, Status> {
+    async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
         let msg = request.into_inner();
         let kv = (msg.key, msg.value);
         let log_writer = self.log_writer.clone();
@@ -57,13 +58,16 @@ impl Store for StoreService {
 
         w.set((&kv.0, kv.1.clone().into()));
 
-        Ok(Response::new(PutReply {
+        Ok(Response::new(PutResponse {
             key: kv.0,
             value: kv.1,
         }))
     }
 
-    async fn delete(&self, request: Request<KeyRequest>) -> Result<Response<DeleteReply>, Status> {
+    async fn delete(
+        &self,
+        request: Request<KeyRequest>,
+    ) -> Result<Response<DeleteResponse>, Status> {
         let msg = request.into_inner();
         let key = msg.key;
         let log_writer = self.log_writer.clone();
@@ -77,7 +81,7 @@ impl Store for StoreService {
                         .await
                         .unwrap(); // append to log
                     w.delete(&key);
-                    Ok(Response::new(DeleteReply { key, value }))
+                    Ok(Response::new(DeleteResponse { key, value }))
                 }
             }
         } else {
