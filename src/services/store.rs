@@ -3,19 +3,19 @@ use crate::store_proto::{
     store_service_server::StoreService as StoreSvc,
 };
 use crate::{
-    ChannelMessage, Op,
+    LogWriterMessage, Op,
     store::{Store as KV, Types},
 };
 use tokio::sync::{RwLock, mpsc::Sender};
 use tonic::{Request, Response, Status};
 
 pub struct StoreService {
-    kv: RwLock<KV>, // in-mem kv
-    log_writer: Sender<ChannelMessage>,
+    kv: RwLock<KV>,
+    log_writer: Sender<LogWriterMessage>,
 }
 
 impl StoreService {
-    pub fn with_log_writer(tx: Sender<ChannelMessage>) -> Self {
+    pub fn with_log_writer(tx: Sender<LogWriterMessage>) -> Self {
         Self {
             kv: Default::default(),
             log_writer: tx,
@@ -45,16 +45,15 @@ impl StoreSvc for StoreService {
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
         let msg = request.into_inner();
         let kv = (msg.key, msg.value);
-        let log_writer = self.log_writer.clone();
 
         let mut w = self.kv.write().await;
-        log_writer
-            .send(ChannelMessage::LogAppend(Op::Put(
+        self.log_writer
+            .send(LogWriterMessage::LogAppend(Op::Put(
                 kv.0.clone(),
                 kv.1.clone().into(),
             )))
             .await
-            .unwrap(); // append to log
+            .unwrap();
 
         w.set((&kv.0, kv.1.clone().into()));
 
@@ -70,16 +69,15 @@ impl StoreSvc for StoreService {
     ) -> Result<Response<DeleteResponse>, Status> {
         let msg = request.into_inner();
         let key = msg.key;
-        let log_writer = self.log_writer.clone();
 
         let mut w = self.kv.write().await;
         if let Some(v) = w.get(&key) {
             match v {
                 Types::String(value) => {
-                    log_writer
-                        .send(ChannelMessage::LogAppend(Op::Delete(key.clone())))
+                    self.log_writer
+                        .send(LogWriterMessage::LogAppend(Op::Delete(key.clone())))
                         .await
-                        .unwrap(); // append to log
+                        .unwrap();
                     w.delete(&key);
                     Ok(Response::new(DeleteResponse { key, value }))
                 }

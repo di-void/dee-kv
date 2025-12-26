@@ -4,7 +4,6 @@ use std::path::Path;
 
 #[derive(Clone, Debug)]
 pub enum Types {
-    // only supports string type for now
     String(String),
 }
 

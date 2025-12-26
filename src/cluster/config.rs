@@ -1,5 +1,8 @@
 use super::{ChannelBuilder, Cluster, ClusterConfig, Node, Peer, PeerStatus, PeersTable};
-use crate::{LOCAL_HOST_IPV4, LOOPBACK_NET_INT_STRING, WILDCARD_IPV4, WILDCARD_NET_INT_STRING};
+use crate::{
+    LOCAL_HOST_IPV4, LOOPBACK_NET_INT_STRING, WILDCARD_IPV4, WILDCARD_NET_INT_STRING,
+    serde::deserialize_entry,
+};
 use anyhow::{Context, Error, Result};
 
 use std::{
@@ -42,7 +45,7 @@ pub fn parse_cluster_config(
 
     let config_path = Path::new(config).canonicalize()?;
     let config_file_contents = fs::read(config_path)?;
-    let cluster_config = serde_json::from_slice::<ClusterConfig>(&config_file_contents)
+    let cluster_config = deserialize_entry::<ClusterConfig>(&config_file_contents)
         .with_context(|| format!("Failed to parse cluster config file"))?;
 
     let ClusterConfig {

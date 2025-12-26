@@ -1,12 +1,6 @@
 use crate::{
-    ChannelMessage, ConsensusMessage,
-    cluster::{
-        Cluster,
-        CurrentNode,
-        Peer,
-        config::init_peers_table,
-        // hearbeats::health::start_heartbeat_loop,
-    },
+    ConsensusMessage, LogWriterMessage,
+    cluster::{Cluster, CurrentNode, Peer, config::init_peers_table},
 };
 use anyhow::Result;
 use std::sync::Arc;
@@ -52,8 +46,8 @@ pub async fn start_election(
 pub async fn begin(
     cc: &Cluster,
     tx_rx: (
-        mpsc::Sender<ChannelMessage>, // log-writer
-        watch::Receiver<Option<()>>,  // shutdown
+        mpsc::Sender<LogWriterMessage>, // log-writer
+        watch::Receiver<Option<()>>,    // shutdown
         watch::Receiver<ConsensusMessage>,
     ),
     _rt: Handle,
@@ -64,8 +58,8 @@ pub async fn begin(
         id: cc.self_id,
         role: super::NodeRole::Follower,
         term: 1,
-        votes: (1, 0),
-        has_voted: false,
+        voted_for: None,
+        votes: 0,
     };
     let current_node = Arc::new(RwLock::new(current_node));
     let p_table = init_peers_table(&cc.peers).await?;
@@ -81,11 +75,6 @@ pub async fn begin(
         )
         .await;
     });
-
-    // let hb_handle = start_heartbeat_loop(Arc::clone(&p_table), rt.clone(), shutdown.clone()).await;
-    // if hb_handle.is_some() {
-    //     hb_handle.unwrap().join().unwrap();
-    // }
 
     Ok(())
 }

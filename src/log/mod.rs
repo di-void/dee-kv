@@ -13,13 +13,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::serde::{Log, LogOperation, Payload, serialize_entry};
-use crate::{ChannelMessage, DATA_DIR, Op};
+use crate::serde::{Log, LogOperation, Payload};
+use crate::{DATA_DIR, LogWriterMessage, Op};
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 
 /// Runs on a separate thread
-pub fn init_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()> {
+pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
@@ -42,23 +42,29 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()>
 
         loop {
             let msg = rx.blocking_recv().unwrap(); // DANGER
+            let term = 1;
             if now.elapsed() >= timeout {
                 now = Instant::now();
                 check_delta = true;
             }
 
             match msg {
-                ChannelMessage::LogAppend(m) => match m {
+                LogWriterMessage::LogAppend(m) => match m {
                     Op::Delete(key) => {
-                        let serialized_payload = serialize_entry(Log {
+                        let log = Log {
                             operation: LogOperation::Delete,
                             payload: Payload::Delete { key: key.clone() },
-                        })
-                        .with_context(|| format!("Failed to serialize Delete payload: ({})", &key))
-                        .unwrap();
+                            term,
+                        };
+                        let serialized_payload = log
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Delete payload: ({})", &key)
+                            })
+                            .unwrap();
 
                         let b = log_w
-                            .append(serialized_payload, check_delta)
+                            .append_log(serialized_payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
 
@@ -67,20 +73,23 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()>
                         println!("LogWriter wrote {b} bytes for {:?}", Op::Delete(key));
                     }
                     Op::Put(key, val) => {
-                        let serialized_payload = serialize_entry(Log {
+                        let log = Log {
                             operation: LogOperation::Put,
                             payload: Payload::Put {
                                 key: key.clone(),
                                 value: val.clone().into(),
                             },
-                        })
-                        .with_context(|| {
-                            format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
-                        })
-                        .unwrap();
+                            term,
+                        };
+                        let serialized_payload = log
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
+                            })
+                            .unwrap();
 
                         let b = log_w
-                            .append(serialized_payload, check_delta)
+                            .append_log(serialized_payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
 
@@ -92,7 +101,12 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<ChannelMessage>) -> JoinHandle<()>
                         );
                     }
                 },
-                ChannelMessage::ShutDown => break,
+                LogWriterMessage::NodeMeta(curr_term, voted_for) => {
+                    // construct serializable meta object from passed args
+                    // serialize the object and then call the function to write
+                    // to the meta file
+                }
+                LogWriterMessage::ShutDown => break,
             }
         }
 

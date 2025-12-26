@@ -19,18 +19,31 @@ pub enum Payload {
 pub struct Log {
     pub operation: LogOperation,
     pub payload: Payload,
+    pub term: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct NodeMeta {
+    current_term: u16,
+    voted_for: Option<u8>,
+}
+
+impl Log {
+    pub fn serialize(&self) -> Result<String> {
+        let mut s = serialize_entry(self)?;
+        s.push_str(LOG_FILE_DELIM);
+        Ok(s)
+    }
 }
 
 // serialize entry
-pub fn serialize_entry(entry: Log) -> Result<String> {
-    let mut se = serde_json::to_string(&entry)?;
-    se.push_str(LOG_FILE_DELIM);
-    Ok(se)
+fn serialize_entry<T: Serialize>(entry: T) -> Result<String> {
+    Ok(serde_json::to_string(&entry)?)
 }
 
 // deserialize entry
-pub fn deserialize_entry(entry: &[u8]) -> Result<Log> {
-    let le = serde_json::from_slice::<Log>(entry)?;
+pub fn deserialize_entry<'de, T: Deserialize<'de>>(entry: &'de [u8]) -> Result<T> {
+    let le = serde_json::from_slice::<T>(entry)?;
     Ok(le)
 }
 

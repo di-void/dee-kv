@@ -50,3 +50,15 @@ pub mod cluster {
         Duration::from_millis(val.into())
     }
 }
+
+pub mod file {
+    use std::{
+        fs::{File, OpenOptions},
+        path::Path,
+    };
+
+    pub fn open_or_create_file(path: &Path) -> anyhow::Result<File> {
+        let file = OpenOptions::new().read(true).create_new(true).open(&path)?;
+        Ok(file)
+    }
+}

@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::serde::{LogOperation, Payload, deserialize_entry};
+use crate::serde::{Log, LogOperation, Payload, deserialize_entry};
 use crate::store::Types;
 use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
 
@@ -20,7 +20,7 @@ pub fn generate_file_name() -> String {
     timestamp_ms
 }
 
-pub fn create_file(name: &str, parent_dir: &Path) -> Result<File> {
+pub fn open_or_create_file(name: &str, parent_dir: &Path) -> Result<File> {
     let file_path = parent_dir.join(name);
     let file = OpenOptions::new()
         .append(true)
@@ -110,7 +110,7 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
 
     file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|v| {
         let bytes = v.unwrap();
-        let log = deserialize_entry(&bytes).unwrap();
+        let log = deserialize_entry::<Log>(&bytes).unwrap();
 
         let op = log.operation;
         match op {
@@ -141,7 +141,7 @@ pub fn check_file_size_or_create(
 ) -> Result<CheckStatus> {
     if check_file_delta(file_size) >= threshold {
         let fname = generate_file_name();
-        let fh = create_file(&fname, parent_path).with_context(|| {
+        let fh = open_or_create_file(&fname, parent_path).with_context(|| {
             format!(
                 "Failed to create new file at: {:?}/{:?}",
                 parent_path.to_str().unwrap(),

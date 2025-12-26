@@ -38,14 +38,11 @@ pub struct CurrentNode {
     pub id: u8,
     pub term: u16,
     pub role: NodeRole,
-    pub votes: (u16, u8), // (term, nVotes)
-    pub has_voted: bool,
+    pub voted_for: Option<u8>,
+    pub votes: u8,
 }
 
 impl CurrentNode {
-    pub fn new() {
-        //
-    }
     pub fn is_follower(&self) -> bool {
         self.role == NodeRole::Follower
     }
@@ -53,19 +50,23 @@ impl CurrentNode {
         self.term = term;
         self.role = Default::default();
     }
+    pub fn from_meta(node_id: u8) -> anyhow::Result<Self> {
+        // find meta file or create it if it doesn't yet exist
+        // if the file exists, parse the contents
+        todo!("get current node")
+    }
     pub fn promote(&mut self) {
-        // check the current node's role
         match self.role {
             NodeRole::Follower => {
                 self.role = NodeRole::Candidate;
                 self.term += 1;
-                self.votes = (self.term, 1);
-                self.has_voted = true;
+                self.votes = 1;
+                self.voted_for = Some(self.id);
             }
             NodeRole::Candidate => {
                 self.role = NodeRole::Leader;
-                self.votes = (self.term, 0); // reset votes
-                self.has_voted = false;
+                self.votes = 0; // reset votes
+                self.voted_for = None;
             }
             _ => {
                 dbg!("Cannot promote a Leader! Current node is already a Leader");
