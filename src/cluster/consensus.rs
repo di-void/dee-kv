@@ -1,5 +1,5 @@
 use crate::{
-    ConsensusMessage, LogWriterMessage,
+    ConsensusMessage, LogWriterMsg,
     cluster::{Cluster, CurrentNode, Peer, config::init_peers_table},
 };
 use anyhow::Result;
@@ -45,23 +45,18 @@ pub async fn start_election(
 
 pub async fn begin(
     cc: &Cluster,
+    current_node: CurrentNode,
     tx_rx: (
-        mpsc::Sender<LogWriterMessage>, // log-writer
-        watch::Receiver<Option<()>>,    // shutdown
+        mpsc::Sender<LogWriterMsg>,  // log-writer
+        watch::Receiver<Option<()>>, // shutdown
         watch::Receiver<ConsensusMessage>,
     ),
     _rt: Handle,
 ) -> Result<()> {
     let (_lw_tx, _sd_tx, csus_rx) = tx_rx;
-    // loaded from persisted data
-    let current_node = CurrentNode {
-        id: cc.self_id,
-        role: super::NodeRole::Follower,
-        term: 1,
-        voted_for: None,
-        votes: 0,
-    };
     let current_node = Arc::new(RwLock::new(current_node));
+    println!("Current Node: {:?}", &current_node);
+
     let p_table = init_peers_table(&cc.peers).await?;
     let p_table = Arc::new(p_table);
 

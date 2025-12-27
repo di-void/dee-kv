@@ -34,6 +34,7 @@ pub enum PeerStatus {
     Dead,
 }
 
+#[derive(Debug)]
 pub struct CurrentNode {
     pub id: u8,
     pub term: u16,
@@ -51,9 +52,38 @@ impl CurrentNode {
         self.role = Default::default();
     }
     pub fn from_meta(node_id: u8) -> anyhow::Result<Self> {
-        // find meta file or create it if it doesn't yet exist
-        // if the file exists, parse the contents
-        todo!("get current node")
+        use crate::serde::{NodeMeta, deserialize_entry};
+        use crate::utils::file;
+        use std::path::PathBuf;
+
+        // Build full path
+        let mut meta_path = PathBuf::from(crate::DATA_DIR);
+        meta_path.push(crate::META_FILE_PATH);
+
+        let node_meta = if file::file_exists(&meta_path) {
+            let content = file::read_file(&meta_path)?;
+            deserialize_entry::<NodeMeta>(&content)?
+        } else {
+            NodeMeta {
+                current_term: 1,
+                voted_for: None,
+            }
+        };
+
+        // Set votes to 1 if voted_for equals node_id, otherwise 0
+        let votes = if node_meta.voted_for == Some(node_id) {
+            1
+        } else {
+            0
+        };
+
+        Ok(Self {
+            id: node_id,
+            term: node_meta.current_term,
+            role: Default::default(),
+            voted_for: node_meta.voted_for,
+            votes,
+        })
     }
     pub fn promote(&mut self) {
         match self.role {

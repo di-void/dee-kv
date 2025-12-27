@@ -61,4 +61,12 @@ pub mod file {
         let file = OpenOptions::new().read(true).create_new(true).open(&path)?;
         Ok(file)
     }
+
+    pub fn read_file(path: &Path) -> anyhow::Result<Vec<u8>> {
+        Ok(std::fs::read(path)?)
+    }
+
+    pub fn file_exists(path: &Path) -> bool {
+        path.exists()
+    }
 }

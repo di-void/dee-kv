@@ -4,6 +4,7 @@ mod writer;
 use crate::{
     LOG_FILE_CHECK_TIMEOUT,
     log::file::{get_log_files, replay_log_file},
+    serde::{CustomSerialize, NodeMeta},
     store::Types,
 };
 use std::{
@@ -14,12 +15,12 @@ use std::{
 };
 
 use crate::serde::{Log, LogOperation, Payload};
-use crate::{DATA_DIR, LogWriterMessage, Op};
+use crate::{DATA_DIR, LogWriterMsg, Op};
 use anyhow::{Context, Result};
 use tokio::sync::mpsc;
 
 /// Runs on a separate thread
-pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<()> {
+pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMsg>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
@@ -49,14 +50,14 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<(
             }
 
             match msg {
-                LogWriterMessage::LogAppend(m) => match m {
+                LogWriterMsg::LogAppend(m) => match m {
                     Op::Delete(key) => {
                         let log = Log {
                             operation: LogOperation::Delete,
                             payload: Payload::Delete { key: key.clone() },
                             term,
                         };
-                        let serialized_payload = log
+                        let payload = log
                             .serialize()
                             .with_context(|| {
                                 format!("Failed to serialize Delete payload: ({})", &key)
@@ -64,7 +65,7 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<(
                             .unwrap();
 
                         let b = log_w
-                            .append_log(serialized_payload.as_bytes(), check_delta)
+                            .append_log(payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
 
@@ -81,7 +82,7 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<(
                             },
                             term,
                         };
-                        let serialized_payload = log
+                        let payload = log
                             .serialize()
                             .with_context(|| {
                                 format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
@@ -89,7 +90,7 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<(
                             .unwrap();
 
                         let b = log_w
-                            .append_log(serialized_payload.as_bytes(), check_delta)
+                            .append_log(payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
 
@@ -101,12 +102,26 @@ pub fn init_log_writer(mut rx: mpsc::Receiver<LogWriterMessage>) -> JoinHandle<(
                         );
                     }
                 },
-                LogWriterMessage::NodeMeta(curr_term, voted_for) => {
-                    // construct serializable meta object from passed args
-                    // serialize the object and then call the function to write
-                    // to the meta file
+                LogWriterMsg::NodeMeta(current_term, voted_for) => {
+                    let meta = NodeMeta {
+                        current_term,
+                        voted_for,
+                    };
+                    let payload = meta
+                        .serialize()
+                        .with_context(|| format!("Failed to serliaze meta object: {:?}", meta))
+                        .unwrap();
+                    let b = log_w
+                        .write_meta(payload.as_bytes())
+                        .with_context(|| format!("Failed to write to meta file"))
+                        .unwrap();
+
+                    println!(
+                        "LogWriter wrote {b} bytes for {{ current_term: {:?}, voted_for: {:?} }} to meta file",
+                        current_term, voted_for
+                    );
                 }
-                LogWriterMessage::ShutDown => break,
+                LogWriterMsg::ShutDown => break,
             }
         }
 

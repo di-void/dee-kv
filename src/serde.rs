@@ -3,6 +3,10 @@ use serde_json::Result;
 
 use crate::LOG_FILE_DELIM;
 
+pub trait CustomSerialize {
+    fn serialize(&self) -> Result<String>;
+}
+
 #[derive(Serialize, Deserialize)]
 pub enum LogOperation {
     Put,
@@ -22,14 +26,20 @@ pub struct Log {
     pub term: u16,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct NodeMeta {
-    current_term: u16,
-    voted_for: Option<u8>,
+    pub current_term: u16,
+    pub voted_for: Option<u8>,
 }
 
-impl Log {
-    pub fn serialize(&self) -> Result<String> {
+impl CustomSerialize for NodeMeta {
+    fn serialize(&self) -> Result<String> {
+        Ok(serialize_entry(self)?)
+    }
+}
+
+impl CustomSerialize for Log {
+    fn serialize(&self) -> Result<String> {
         let mut s = serialize_entry(self)?;
         s.push_str(LOG_FILE_DELIM);
         Ok(s)

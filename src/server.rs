@@ -3,7 +3,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{LogWriterMessage, cluster::Cluster};
+use crate::{LogWriterMsg, cluster::Cluster};
 use crate::{
     health_proto::health_check_service_server::HealthCheckServiceServer,
     services::{health::HealthCheckService, store::StoreService},
@@ -12,7 +12,7 @@ use crate::{
 
 pub async fn start(
     cluster_config: &Cluster,
-    lw_tx: mpsc::Sender<LogWriterMessage>,
+    lw_tx: mpsc::Sender<LogWriterMsg>,
     sd_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<JoinHandle<()>> {
     println!("{:#?}", cluster_config);
@@ -45,7 +45,7 @@ pub async fn start(
 
 #[cfg(windows)]
 async fn shutdown_server(
-    lw_tx: mpsc::Sender<LogWriterMessage>,
+    lw_tx: mpsc::Sender<LogWriterMsg>,
     s_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
     use tokio::signal;
@@ -58,7 +58,7 @@ async fn shutdown_server(
 
 #[cfg(unix)]
 async fn shutdown_server(
-    lw_tx: mpsc::Sender<LogWriterMessage>,
+    lw_tx: mpsc::Sender<LogWriterMsg>,
     s_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
@@ -85,10 +85,10 @@ async fn shutdown_server(
 }
 
 async fn issue_shutdown(
-    lw_tx: &mpsc::Sender<LogWriterMessage>,
+    lw_tx: &mpsc::Sender<LogWriterMsg>,
     s_tx: &watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
-    lw_tx.send(LogWriterMessage::ShutDown).await?; // shutdown log writer
+    lw_tx.send(LogWriterMsg::ShutDown).await?; // shutdown log writer
     if let Err(e) = s_tx.send(Some(())) {
         println!("Failed to send shutdown message: {:?}", e);
     };

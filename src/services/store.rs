@@ -3,7 +3,7 @@ use crate::store_proto::{
     store_service_server::StoreService as StoreSvc,
 };
 use crate::{
-    LogWriterMessage, Op,
+    LogWriterMsg, Op,
     store::{Store as KV, Types},
 };
 use tokio::sync::{RwLock, mpsc::Sender};
@@ -11,11 +11,11 @@ use tonic::{Request, Response, Status};
 
 pub struct StoreService {
     kv: RwLock<KV>,
-    log_writer: Sender<LogWriterMessage>,
+    log_writer: Sender<LogWriterMsg>,
 }
 
 impl StoreService {
-    pub fn with_log_writer(tx: Sender<LogWriterMessage>) -> Self {
+    pub fn with_log_writer(tx: Sender<LogWriterMsg>) -> Self {
         Self {
             kv: Default::default(),
             log_writer: tx,
@@ -48,7 +48,7 @@ impl StoreSvc for StoreService {
 
         let mut w = self.kv.write().await;
         self.log_writer
-            .send(LogWriterMessage::LogAppend(Op::Put(
+            .send(LogWriterMsg::LogAppend(Op::Put(
                 kv.0.clone(),
                 kv.1.clone().into(),
             )))
@@ -75,7 +75,7 @@ impl StoreSvc for StoreService {
             match v {
                 Types::String(value) => {
                     self.log_writer
-                        .send(LogWriterMessage::LogAppend(Op::Delete(key.clone())))
+                        .send(LogWriterMsg::LogAppend(Op::Delete(key.clone())))
                         .await
                         .unwrap();
                     w.delete(&key);

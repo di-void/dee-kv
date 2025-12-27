@@ -12,9 +12,9 @@ pub enum Op {
     Delete(String),            // (key, term)
 }
 
-pub enum LogWriterMessage {
+pub enum LogWriterMsg {
     LogAppend(Op),
-    NodeMeta(u16, Option<u16>), // (currentTerm, votedFor)
+    NodeMeta(u16, Option<u8>), // (currentTerm, votedFor)
     ShutDown,
 }
 
