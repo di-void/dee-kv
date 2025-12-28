@@ -32,8 +32,8 @@ impl Store {
         self._store.insert(kv.0.to_string(), kv.1);
     }
 
-    pub fn delete(&mut self, k: &str) {
-        self._store.remove(k);
+    pub fn delete(&mut self, k: &str) -> Option<Types> {
+        self._store.remove(k)
     }
 }
 

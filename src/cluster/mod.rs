@@ -64,6 +64,7 @@ impl CurrentNode {
             let content = file::read_file(&meta_path)?;
             deserialize_entry::<NodeMeta>(&content)?
         } else {
+            // create the file
             NodeMeta {
                 current_term: 1,
                 voted_for: None,

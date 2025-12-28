@@ -8,28 +8,12 @@ pub mod env {
     }
 
     pub fn parse_cli_args() -> Result<HashMap<String, String>> {
-        let mut args = env::args();
-        args.next(); // skip exe
-
-        let cli_args = args
-            .filter_map(|a| {
-                if !a.starts_with("--") {
-                    return None;
-                }
-
-                let args_iter = &mut a[2..].split('=');
-                let mut k: &str = "";
-                let mut v: &str = "";
-                for i in 0..=1 {
-                    let item = args_iter.next().unwrap_or("");
-                    if i == 0 {
-                        k = item
-                    } else {
-                        v = item;
-                    }
-                }
-
-                return Some((k.to_string(), v.to_string()));
+        let cli_args = env::args()
+            .skip(1)
+            .filter_map(|arg| {
+                arg.strip_prefix("--")
+                    .and_then(|kv| kv.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
             })
             .collect::<HashMap<_, _>>();
 
@@ -58,7 +42,11 @@ pub mod file {
     };
 
     pub fn open_or_create_file(path: &Path) -> anyhow::Result<File> {
-        let file = OpenOptions::new().read(true).create_new(true).open(&path)?;
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .open(&path)?;
         Ok(file)
     }
 

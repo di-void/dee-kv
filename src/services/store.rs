@@ -71,21 +71,18 @@ impl StoreSvc for StoreService {
         let key = msg.key;
 
         let mut w = self.kv.write().await;
-        if let Some(v) = w.get(&key) {
-            match v {
-                Types::String(value) => {
-                    self.log_writer
-                        .send(LogWriterMsg::LogAppend(Op::Delete(key.clone())))
-                        .await
-                        .unwrap();
-                    w.delete(&key);
-                    Ok(Response::new(DeleteResponse { key, value }))
-                }
+        match w.delete(&key) {
+            Some(v) => {
+                let value: String = v.into(); // we only have string types now
+                self.log_writer
+                    .send(LogWriterMsg::LogAppend(Op::Delete(key.clone())))
+                    .await
+                    .unwrap();
+                Ok(Response::new(DeleteResponse { key, value }))
             }
-        } else {
-            Err(Status::invalid_argument(format!(
+            _ => Err(Status::invalid_argument(format!(
                 "Key: '{key}' doesn't exist"
-            )))
+            ))),
         }
     }
 }
