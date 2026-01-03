@@ -1,4 +1,5 @@
 use crate::{DATA_DIR, log::load_store};
+use anyhow::Context;
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -14,18 +15,16 @@ pub struct Store {
 impl Default for Store {
     fn default() -> Self {
         Self {
-            _store: load_store(Path::new(DATA_DIR)).unwrap(),
+            _store: load_store(Path::new(DATA_DIR))
+                .with_context(|| format!("Error occurred while loading store"))
+                .unwrap(),
         }
     }
 }
 
 impl Store {
     pub fn get(&self, k: &str) -> Option<Types> {
-        if let Some(val) = self._store.get(k) {
-            Some(val.to_owned())
-        } else {
-            None
-        }
+        self._store.get(k).map(|v| v.to_owned())
     }
 
     pub fn set(&mut self, kv: (&str, Types)) {

@@ -8,18 +8,19 @@ pub mod utils;
 
 #[derive(Debug)]
 pub enum Op {
-    Put(String, store::Types), // (key, value, term)
-    Delete(String),            // (key, term)
+    Put(String, store::Types), // (key, value)
+    Delete(String),            // (key)
 }
 
 pub enum LogWriterMsg {
     LogAppend(Op),
-    NodeMeta(u16, Option<u8>), // (currentTerm, votedFor)
+    NodeMeta(Term, Option<u8>), // (currentTerm, votedFor)
     ShutDown,
 }
 
 pub enum ConsensusMessage {
     LeaderAssert,
+    RequestVote,
     Init,
 }
 
@@ -32,6 +33,9 @@ pub mod health_proto {
 pub mod consensus_proto {
     tonic::include_proto!("consensus");
 }
+
+pub type Term = u16;
+pub type LogIdx = u64;
 
 pub const DATA_DIR: &str = "./DATA";
 pub const LOOPBACK_NET_INT_STRING: &str = "loopback";

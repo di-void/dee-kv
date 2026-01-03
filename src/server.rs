@@ -1,33 +1,34 @@
+use std::sync::Arc;
 use tokio::{
-    sync::{mpsc, watch},
+    sync::{RwLock, mpsc, watch},
     task::JoinHandle,
 };
 
-use crate::{LogWriterMsg, cluster::Cluster};
+use crate::{LogWriterMsg, cluster::CurrentNode};
 use crate::{
+    consensus_proto::consensus_service_server::ConsensusServiceServer,
     health_proto::health_check_service_server::HealthCheckServiceServer,
-    services::{health::HealthCheckService, store::StoreService},
+    services::{consensus::ConsensusService, health::HealthCheckService, store::StoreService},
     store_proto::store_service_server::StoreServiceServer,
 };
 
 pub async fn start(
-    cluster_config: &Cluster,
+    addr: std::net::SocketAddr,
+    _current_node: Arc<RwLock<CurrentNode>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
     sd_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<JoinHandle<()>> {
-    println!("{:#?}", cluster_config);
-
-    let addr = cluster_config.self_address.clone();
-
     let handle = tokio::spawn(async move {
         println!("Server is listening on {addr}");
 
         let store_svc = StoreService::with_log_writer(lw_tx.clone());
         let health_svc = HealthCheckService::default();
+        let consensus_svc = ConsensusService::default();
 
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(HealthCheckServiceServer::new(health_svc))
             .add_service(StoreServiceServer::new(store_svc))
+            .add_service(ConsensusServiceServer::new(consensus_svc))
             .serve_with_shutdown(addr, async {
                 match shutdown_server(lw_tx, sd_tx).await {
                     Ok(_) => (),

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-use crate::LOG_FILE_DELIM;
+use crate::{LOG_FILE_DELIM, Term};
 
 pub trait CustomSerialize {
     fn serialize(&self) -> Result<String>;
@@ -23,12 +23,24 @@ pub enum Payload {
 pub struct Log {
     pub operation: LogOperation,
     pub payload: Payload,
-    pub term: u16,
+    pub term: Term,
+    pub index: u64,
+}
+// Each log entry now includes a monotonic `index` for fast lookups.
+impl Log {
+    pub fn with_index(operation: LogOperation, payload: Payload, term: Term, index: u64) -> Self {
+        Log {
+            operation,
+            payload,
+            term,
+            index,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeMeta {
-    pub current_term: u16,
+    pub current_term: Term,
     pub voted_for: Option<u8>,
 }
 

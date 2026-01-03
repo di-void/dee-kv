@@ -7,6 +7,8 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint, Uri};
 
+use crate::Term;
+
 #[derive(Deserialize, Clone, Debug)]
 pub struct Node {
     id: u8,
@@ -37,7 +39,7 @@ pub enum PeerStatus {
 #[derive(Debug)]
 pub struct CurrentNode {
     pub id: u8,
-    pub term: u16,
+    pub term: Term,
     pub role: NodeRole,
     pub voted_for: Option<u8>,
     pub votes: u8,
@@ -47,12 +49,12 @@ impl CurrentNode {
     pub fn is_follower(&self) -> bool {
         self.role == NodeRole::Follower
     }
-    pub fn step_down(&mut self, term: u16) {
+    pub fn step_down(&mut self, term: Term) {
         self.term = term;
         self.role = Default::default();
     }
     pub fn from_meta(node_id: u8) -> anyhow::Result<Self> {
-        use crate::serde::{NodeMeta, deserialize_entry};
+        use crate::serde::{CustomSerialize, NodeMeta, deserialize_entry};
         use crate::utils::file;
         use std::path::PathBuf;
 
@@ -64,11 +66,12 @@ impl CurrentNode {
             let content = file::read_file(&meta_path)?;
             deserialize_entry::<NodeMeta>(&content)?
         } else {
-            // create the file
-            NodeMeta {
+            let meta = NodeMeta {
                 current_term: 1,
                 voted_for: None,
-            }
+            };
+            std::fs::write(&meta_path, meta.serialize()?.as_bytes())?;
+            meta
         };
 
         // Set votes to 1 if voted_for equals node_id, otherwise 0

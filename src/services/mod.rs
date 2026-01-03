@@ -1,3 +1,4 @@
+pub mod consensus;
 pub mod health;
 pub mod store;
 
