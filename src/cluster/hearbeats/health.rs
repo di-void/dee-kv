@@ -11,6 +11,38 @@ use std::{
 use tokio::{runtime::Handle, sync::watch, time::timeout};
 use tonic::Request;
 
+/// Starts a background heartbeat loop that periodically pings peers in the provided peers table.
+///
+/// The loop runs on a new thread and enters the provided Tokio runtime's context to spawn per-peer
+/// async ping tasks. The loop checks `shutdown_rx` each iteration and exits when it contains
+/// `Some(())`. If the peers table is empty at call time, the function returns `None` and no thread
+/// is spawned.
+///
+/// Arguments:
+/// - `pt` — shared `PeersTable` used by the heartbeat loop; an `Arc` is cloned for use by the thread.
+/// - `rt` — a `tokio::runtime::Handle` whose context is entered on the spawned thread to run async tasks.
+/// - `shutdown_rx` — a `watch::Receiver<Option<()>>` watched each iteration; writing `Some(())` to the
+///   corresponding sender signals the loop to shut down.
+///
+/// # Returns
+///
+/// `Some(JoinHandle)` for the spawned thread when the loop was started, `None` if no peers were present.
+///
+/// # Examples
+///
+/// ```no_run
+/// use std::sync::Arc;
+/// use tokio::runtime::Runtime;
+/// use tokio::sync::watch;
+///
+/// // Assume `PeersTable` and `start_heartbeat_loop` are defined in the current crate.
+/// // let pt: Arc<PeersTable> = Arc::new(PeersTable::new());
+/// // let rt = Runtime::new().unwrap();
+/// // let (tx, rx) = watch::channel(None);
+/// // let handle = start_heartbeat_loop(pt.clone(), rt.handle().clone(), rx);
+/// // // ... later signal shutdown:
+/// // let _ = tx.send(Some(()));
+/// ```
 pub async fn start_heartbeat_loop(
     pt: Arc<PeersTable>,
     rt: Handle,

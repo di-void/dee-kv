@@ -15,6 +15,28 @@ use tokio::{
 };
 use tonic::{Request, transport::Channel};
 
+/// Runs the continuous election loop for the local node and attempts to acquire leadership.
+///
+/// When an election timeout elapses, a follower is promoted to candidate (votes for itself),
+/// the node's metadata is persisted via the provided log-writer, and RequestVote RPCs are
+/// dispatched concurrently to all peers. Incoming consensus messages observed on `csus_rx`
+/// that are `LeaderAssert` or `VoteGranted` reset the election timer. If the collected votes
+/// reach `quorom`, the node is promoted to leader.
+///
+/// # Parameters
+///
+/// - `current_node`: shared mutable state for the local node.
+/// - `quorom`: number of votes required to become leader.
+/// - `p_table`: table of peer nodes used to create RPC clients.
+/// - `csus_rx`: watch receiver for consensus messages that can reset the election timer.
+/// - `lw`: sender to persist node metadata to the log writer.
+///
+/// # Examples
+///
+/// ```
+/// // Spawn the election loop (arguments omitted for brevity).
+/// // tokio::spawn(start_election(current_node, quorom, p_table, csus_rx, lw));
+/// ```
 pub async fn start_election(
     current_node: Arc<RwLock<CurrentNode>>,
     quorom: u8,
