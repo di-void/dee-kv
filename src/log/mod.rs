@@ -20,7 +20,31 @@ use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
 
-/// Runs on a separate thread
+/// Starts a dedicated thread that serializes and persists log entries and node metadata.
+///
+/// The spawned thread listens on the provided `rx` receiver for `LogWriterMsg` commands:
+/// - `LogAppend(Op::Put)` and `LogAppend(Op::Delete)`: serialize a `Log` with the current term and next index,
+///   append it to the log file, update the atomics `LAST_LOG_INDEX` and `LAST_LOG_TERM`, and increment the next index.
+/// - `NodeMeta(current_term, voted_for)`: serialize and write node metadata to the meta file and update the active term.
+/// - `ShutDown`: stop the writer thread and return.
+///
+/// The function panics if the underlying `LogWriter` cannot be initialized. The caller is responsible for joining
+/// the returned handle to observe thread termination.
+///
+/// # Examples
+///
+/// ```
+/// use tokio::sync::mpsc;
+/// use crate::log::{init_log_writer, LogWriterMsg, Term};
+///
+/// // create a channel and start the writer thread
+/// let (tx, rx) = mpsc::channel(1);
+/// let handle = init_log_writer(1 as Term, rx);
+///
+/// // request shutdown and wait for the writer to exit
+/// let _ = tokio::spawn(async move { let _ = tx.send(LogWriterMsg::ShutDown).await; });
+/// handle.join().unwrap();
+/// ```
 pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) -> JoinHandle<()> {
     use writer::LogWriter;
 
@@ -150,6 +174,21 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
 }
 
 // replay file to rebuild in-mem map
+/// Rebuilds the in-memory key-value store by replaying persisted log files from a directory.
+///
+/// Reconstructs and returns a HashMap of keys to `Types` by locating all log files under `path` and replaying their entries in order.
+///
+/// # Returns
+/// A `HashMap<String, Types>` containing the last persisted value for each key found in the logs.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// // Rebuild store from the "./data" log directory
+/// let store = crate::log::load_store(Path::new("./data")).unwrap();
+/// assert!(store.is_empty() || store.len() >= 0);
+/// ```
 pub fn load_store(path: &Path) -> Result<HashMap<String, Types>> {
     let mut hash: HashMap<String, Types> = HashMap::new();
     println!("Rebuilding map..");
@@ -169,6 +208,19 @@ type LastTerm = Term;
 pub static LAST_LOG_INDEX: AtomicU32 = AtomicU32::new(0);
 pub static LAST_LOG_TERM: AtomicU32 = AtomicU32::new(1);
 
+/// Returns the highest persisted log index known to this process.
+///
+/// # Returns
+///
+/// `LastIdx` containing the last persisted log index; `0` if no log entries have been recorded.
+///
+/// # Examples
+///
+/// ```
+/// let idx = get_last_log_index();
+/// // idx == 0 when no logs are present
+/// assert!(idx >= 0);
+/// ```
 pub fn get_last_log_index() -> LastIdx {
     LAST_LOG_INDEX.load(Ordering::SeqCst)
 }
@@ -177,11 +229,35 @@ pub fn get_last_log_term() -> LastTerm {
     LAST_LOG_TERM.load(Ordering::SeqCst) as LastTerm
 }
 
+/// Set the global last-log term and index used for recovery and coordination.
+///
+/// This updates the module-level atomic metadata that other threads read to determine
+/// the highest known log term and index.
+///
+/// # Examples
+///
+/// ```
+/// // Initialize last-log metadata to term 2 and index 42
+/// init_last_log_meta(2, 42);
+/// assert_eq!(get_last_log_term(), 2);
+/// assert_eq!(get_last_log_index(), 42);
+/// ```
 pub fn init_last_log_meta(term: LastTerm, idx: LastIdx) {
     LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
     LAST_LOG_INDEX.store(idx, Ordering::SeqCst);
 }
 
+/// Determine the last persisted log term and index by scanning existing log files.
+///
+/// Returns the most-recently written log record's `(term, index)`. If no log files or
+/// no valid log records are found, returns `(1, 0)`.
+///
+/// # Examples
+///
+/// ```
+/// let (_term, _index) = crate::log::get_log_meta();
+/// // Use the returned term and index as needed.
+/// ```
 pub fn get_log_meta() -> (LastTerm, LastIdx) {
     use crate::{LOG_FILE_DELIM, serde::deserialize_entry};
     use std::io::{Read, Seek, SeekFrom};

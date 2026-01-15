@@ -29,6 +29,27 @@ pub struct Log {
 
 // Each log entry now includes a monotonic `index` for fast lookups.
 impl Log {
+    /// Creates a `Log` record using the provided operation, payload, term, and index.
+    ///
+    /// The `index` is the record's monotonic position used for lookups and ordering.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crate::{Log, LogOperation, Payload, Term};
+    ///
+    /// let op = LogOperation::Put;
+    /// let payload = Payload::Put { key: "k".into(), value: "v".into() };
+    /// let term: Term = 1;
+    /// let log = Log::with_index(op, payload, term, 42);
+    ///
+    /// assert_eq!(log.term, 1);
+    /// assert_eq!(log.index, 42);
+    /// if let Payload::Put { key, value } = log.payload {
+    ///     assert_eq!(key, "k");
+    ///     assert_eq!(value, "v");
+    /// }
+    /// ```
     pub fn with_index(operation: LogOperation, payload: Payload, term: Term, index: u32) -> Self {
         Log {
             operation,
