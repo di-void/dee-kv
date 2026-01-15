@@ -17,7 +17,7 @@ use std::{
 use crate::serde::{Log, LogOperation, Payload};
 use crate::{DATA_DIR, LogWriterMsg, Op, Term};
 use anyhow::{Context, Result};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
 
 /// Runs on a separate thread
@@ -75,9 +75,10 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                             .unwrap();
 
                         check_delta = false;
-                        // update atomics to reflect the newly appended entry
+
                         LAST_LOG_INDEX.store(next_index, Ordering::SeqCst);
                         LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
+
                         // increment index after successful append
                         next_index = next_index.saturating_add(1);
 
@@ -106,10 +107,9 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                             .unwrap();
 
                         check_delta = false;
-                        // update atomics to reflect the newly appended entry
+
                         LAST_LOG_INDEX.store(next_index, Ordering::SeqCst);
                         LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
-                        // increment index after successful append
                         next_index = next_index.saturating_add(1);
 
                         println!(
@@ -163,10 +163,10 @@ pub fn load_store(path: &Path) -> Result<HashMap<String, Types>> {
     Ok(hash)
 }
 
-type LastIdx = u64;
+type LastIdx = u32;
 type LastTerm = Term;
 // Atomics to hold last-known log index and term for fast, lock-free reads
-pub static LAST_LOG_INDEX: AtomicU64 = AtomicU64::new(0);
+pub static LAST_LOG_INDEX: AtomicU32 = AtomicU32::new(0);
 pub static LAST_LOG_TERM: AtomicU32 = AtomicU32::new(1);
 
 pub fn get_last_log_index() -> LastIdx {
@@ -181,6 +181,7 @@ pub fn init_last_log_meta(term: LastTerm, idx: LastIdx) {
     LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
     LAST_LOG_INDEX.store(idx, Ordering::SeqCst);
 }
+
 pub fn get_log_meta() -> (LastTerm, LastIdx) {
     use crate::{LOG_FILE_DELIM, serde::deserialize_entry};
     use std::io::{Read, Seek, SeekFrom};

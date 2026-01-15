@@ -24,7 +24,7 @@ pub async fn start_heartbeat_loop(
         return None;
     }
 
-    let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(Arc::clone(&pt));
+    let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(&pt);
 
     let h = thread::spawn(move || {
         let _guard = rt.enter();

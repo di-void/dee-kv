@@ -24,11 +24,12 @@ pub struct Log {
     pub operation: LogOperation,
     pub payload: Payload,
     pub term: Term,
-    pub index: u64,
+    pub index: u32,
 }
+
 // Each log entry now includes a monotonic `index` for fast lookups.
 impl Log {
-    pub fn with_index(operation: LogOperation, payload: Payload, term: Term, index: u64) -> Self {
+    pub fn with_index(operation: LogOperation, payload: Payload, term: Term, index: u32) -> Self {
         Log {
             operation,
             payload,

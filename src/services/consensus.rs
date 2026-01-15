@@ -1,10 +1,13 @@
-use crate::consensus_proto::{
-    AppendEntriesRequest, AppendEntriesResponse, LeaderAssertRequest, LeaderAssertResponse,
-    RequestVoteRequest, RequestVoteResponse,
-    consensus_service_server::ConsensusService as ConsensusSvc,
+use crate::{
+    consensus_proto::{
+        AppendEntriesRequest, AppendEntriesResponse, LeaderAssertRequest, LeaderAssertResponse,
+        RequestVoteRequest, RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
+        consensus_service_server::ConsensusService as ConsensusSvc,
+    },
+    services::GrpcClientWrapper,
 };
 
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, transport::Channel};
 
 #[derive(Default)]
 pub struct ConsensusService {}
@@ -30,5 +33,11 @@ impl ConsensusSvc for ConsensusService {
         _request: Request<LeaderAssertRequest>,
     ) -> Result<Response<LeaderAssertResponse>, Status> {
         todo!("leader assert");
+    }
+}
+
+impl GrpcClientWrapper for ConsensusServiceClient<Channel> {
+    fn new_client(inner: Channel) -> Self {
+        Self::new(inner)
     }
 }
