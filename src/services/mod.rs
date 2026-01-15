@@ -12,8 +12,8 @@ pub trait GrpcClientWrapper<C = Self, Ch = Channel> {
 }
 
 pub fn create_custom_clients<C: GrpcClientWrapper>(
-    pt: Arc<PeersTable>,
-) -> Vec<(Mutex<C>, Arc<Mutex<Peer>>)> {
+    pt: &Arc<PeersTable>,
+) -> Vec<(C, Arc<Mutex<Peer>>)> {
     let cp = pt
         .iter()
         .map(|p| {
@@ -21,7 +21,7 @@ pub fn create_custom_clients<C: GrpcClientWrapper>(
             let client = C::new_client(guard.channel.clone());
             drop(guard);
 
-            (Mutex::new(client), Arc::clone(p))
+            (client, Arc::clone(p))
         })
         .collect();
 

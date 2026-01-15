@@ -3,28 +3,28 @@ syntax = "proto3";
 package consensus;
 
 message LeaderAssertRequest {
-  int32 term = 1;
+  uint32 term = 1;
 }
 message LeaderAssertResponse {
-  int32 term = 1;
+  uint32 term = 1;
 }
 
 message RequestVoteRequest {
-  int32 term = 1;
-  int32 candidate_id = 2;
-  int32 last_log_index = 3;
-  int32 last_log_term = 4;
+  uint32 term = 1;
+  uint32 candidate_id = 2;
+  uint32 last_log_index = 3;
+  uint32 last_log_term = 4;
 }
 message RequestVoteResponse {
-  int32 term = 1;
+  uint32 term = 1;
   bool vote_granted = 2;
 }
 
 message AppendEntriesRequest {
-  int32 term = 1;
+  uint32 term = 1;
 }
 message AppendEntriesResponse {
-  int32 term = 1;
+  uint32 term = 1;
 }
 
 // raft

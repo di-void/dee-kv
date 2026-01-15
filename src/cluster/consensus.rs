@@ -1,19 +1,24 @@
 use crate::{
     ConsensusMessage, LogWriterMsg,
-    cluster::{Cluster, CurrentNode, Peer, config::init_peers_table},
+    cluster::{Cluster, CurrentNode, PeersTable, config::init_peers_table},
+    consensus_proto::{RequestVoteRequest, consensus_service_client::ConsensusServiceClient},
+    services::create_custom_clients,
 };
-use anyhow::Result;
-use std::sync::Arc;
+use anyhow::{Context, Result};
+use futures::stream::{FuturesUnordered, StreamExt};
+use std::sync::{Arc, atomic::Ordering};
 use tokio::{
     runtime::Handle,
-    sync::{Mutex, RwLock, mpsc, watch},
+    sync::{RwLock, mpsc, watch},
+    task,
     time::timeout,
 };
+use tonic::{Request, transport::Channel};
 
 pub async fn start_election(
     current_node: Arc<RwLock<CurrentNode>>,
-    _quorom: u8,
-    _p_table: Arc<Vec<Arc<Mutex<Peer>>>>,
+    quorom: u8,
+    p_table: Arc<PeersTable>,
     mut csus_rx: watch::Receiver<ConsensusMessage>,
     lw: mpsc::Sender<LogWriterMsg>, // log-writer
 ) {
@@ -22,7 +27,8 @@ pub async fn start_election(
     loop {
         if let Err(_) = timeout(get_random_election_timeout(), async {
             if csus_rx.changed().await.is_ok() {
-                if let ConsensusMessage::LeaderAssert | ConsensusMessage::RequestVote =
+                // reset timer conditions
+                if let ConsensusMessage::LeaderAssert | ConsensusMessage::VoteGranted =
                     *csus_rx.borrow_and_update()
                 {
                     return;
@@ -31,20 +37,70 @@ pub async fn start_election(
         })
         .await
         {
-            // transition to candidate
             let mut cw = current_node.write().await;
             if cw.is_follower() {
-                cw.promote();
+                // transition to candidate
+                cw.promote(); // +1 vote
                 lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
                     .await
                     .unwrap();
             };
-            // we start sending out request for votes
-            // collate vote responses and if it doesn't meet the quorom
-            // we cancel and retry from the top
-            // if it meets the quorom, we promote current node to leader
-            // and spawn a task for leader heartbeats so that it begins sending them out
-            // to assert dominance
+            let (curr_term, candidate_id, mut votes) = (cw.term, cw.id, 1);
+            drop(cw);
+
+            let pt = Arc::clone(&p_table);
+            let clients = task::spawn_blocking(move || {
+                let p_table = pt;
+                create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
+            })
+            .await
+            .unwrap();
+
+            use crate::log::{LAST_LOG_INDEX, LAST_LOG_TERM};
+            let last_log_index = LAST_LOG_INDEX.load(Ordering::SeqCst);
+            let last_log_term = LAST_LOG_TERM.load(Ordering::SeqCst);
+
+            let mut futs = FuturesUnordered::new();
+
+            for (mut client, _) in clients {
+                let handle = tokio::spawn(async move {
+                    let req = Request::new(RequestVoteRequest {
+                        term: curr_term.into(),
+                        candidate_id: candidate_id.into(),
+                        last_log_index,
+                        last_log_term,
+                    });
+
+                    let res = client
+                        .request_vote(req)
+                        .await
+                        .with_context(|| format!("[FAILED REQUEST]: `request_vote`")) // TODO: include peer node id
+                        .unwrap();
+                    let vote_response = res.into_inner();
+                    if vote_response.vote_granted {
+                        true
+                    } else {
+                        panic!("VOTE DENIED!"); // TODO: include peer node id
+                    }
+                });
+
+                futs.push(handle);
+            }
+
+            while let Some(r) = futs.next().await {
+                if r.is_ok() {
+                    votes += 1;
+                }
+            }
+
+            let mut cw = current_node.write().await;
+            if votes < quorom {
+                let term = cw.term;
+                cw.step_down(term);
+            } else {
+                cw.promote(); // leader
+                // start sending hearbeats for dominance
+            }
         };
     }
 }
