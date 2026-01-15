@@ -1,7 +1,7 @@
 use crate::{
     cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS, Peer, PeerStatus, PeersTable},
     health_proto::{PingRequest, health_check_service_client::HealthCheckServiceClient},
-    services::create_custom_clients,
+    // services::create_custom_clients,
 };
 use anyhow::Result;
 use std::{
@@ -10,7 +10,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::{runtime::Handle, sync::watch, time::timeout};
-use tonic::{Request, transport::Channel};
+use tonic::Request;
 
 pub async fn start_heartbeat_loop(
     pt: Arc<PeersTable>,
@@ -24,7 +24,7 @@ pub async fn start_heartbeat_loop(
         return None;
     }
 
-    let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(&pt);
+    // let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(&pt);
 
     let h = thread::spawn(move || {
         let _guard = rt.enter();

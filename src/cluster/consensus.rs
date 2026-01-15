@@ -10,6 +10,7 @@ use std::sync::{Arc, atomic::Ordering};
 use tokio::{
     runtime::Handle,
     sync::{RwLock, mpsc, watch},
+    task,
     time::timeout,
 };
 use tonic::{Request, transport::Channel};
@@ -36,28 +37,32 @@ pub async fn start_election(
         })
         .await
         {
-            // transition to candidate
             let mut cw = current_node.write().await;
             if cw.is_follower() {
+                // transition to candidate
                 cw.promote(); // +1 vote
                 lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
                     .await
                     .unwrap();
             };
+            let (curr_term, candidate_id, mut votes) = (cw.term, cw.id, 1);
+            drop(cw);
 
-            let clients = create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table);
+            let pt = Arc::clone(&p_table);
+            let clients = task::spawn_blocking(move || {
+                let p_table = pt;
+                create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
+            })
+            .await
+            .unwrap();
 
             use crate::log::{LAST_LOG_INDEX, LAST_LOG_TERM};
             let last_log_index = LAST_LOG_INDEX.load(Ordering::SeqCst);
             let last_log_term = LAST_LOG_TERM.load(Ordering::SeqCst);
-            let curr_term = cw.term;
-            let candidate_id = cw.id;
 
             let mut futs = FuturesUnordered::new();
 
-            for (cs, _) in clients {
-                let mut client = cs.lock_owned().await;
-
+            for (mut client, _) in clients {
                 let handle = tokio::spawn(async move {
                     let req = Request::new(RequestVoteRequest {
                         term: curr_term.into(),
@@ -84,14 +89,16 @@ pub async fn start_election(
 
             while let Some(r) = futs.next().await {
                 if r.is_ok() {
-                    cw.votes += 1;
+                    votes += 1;
                 }
             }
 
-            if cw.votes < quorom {
-                break;
+            let mut cw = current_node.write().await;
+            if votes < quorom {
+                let term = cw.term;
+                cw.step_down(term);
             } else {
-                cw.promote(); // promote to Leader
+                cw.promote(); // leader
                 // start sending hearbeats for dominance
             }
         };

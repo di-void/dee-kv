@@ -230,14 +230,14 @@ pub fn get_log_meta() -> (LastTerm, LastIdx) {
                         acc = combined;
                     }
 
-                    // iterate records from the end using rsplit (zero-copy)
+                    // iterate records from the end using rsplit
                     for record in acc.rsplit(|&b| b == delim) {
                         if record.is_empty() {
-                            continue;
+                            continue; // trailing delimiter
                         }
                         if let Ok(log) = deserialize_entry::<Log>(record) {
                             last_term = log.term;
-                            last_idx = log.index as LastIdx;
+                            last_idx = log.index;
                             return (last_term, last_idx);
                         } else {
                             // parsing failed for this candidate, try earlier
