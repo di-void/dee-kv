@@ -1,7 +1,6 @@
 use crate::{
     cluster::{HEARTBEAT_INTERVAL_MS, PEER_FAILURE_TIMEOUT_MS, Peer, PeerStatus, PeersTable},
     health_proto::{PingRequest, health_check_service_client::HealthCheckServiceClient},
-    // services::create_custom_clients,
 };
 use anyhow::Result;
 use std::{
@@ -23,8 +22,6 @@ pub async fn start_heartbeat_loop(
         println!("Heartbeat loop aborted. No peers found in peers_table");
         return None;
     }
-
-    // let _clients = create_custom_clients::<HealthCheckServiceClient<Channel>>(&pt);
 
     let h = thread::spawn(move || {
         let _guard = rt.enter();
