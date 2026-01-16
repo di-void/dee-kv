@@ -4,7 +4,7 @@ use crate::{
     consensus_proto::{RequestVoteRequest, consensus_service_client::ConsensusServiceClient},
     services::create_custom_clients,
 };
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::sync::{Arc, atomic::Ordering};
 use std::time::Duration;
@@ -68,7 +68,7 @@ pub async fn start_election(
                         }
                     } else {
                         dbg!("Consensus Message Channel closed prematurely!");
-                        break 'outer; // abort election loop
+                        return Err(anyhow!("Aborted Election!")); // abort election loop
                     }
                 }
                 _ = shutdown_rx.changed() => {
@@ -184,7 +184,7 @@ pub async fn begin(
     let quorom = cc.quorom;
     tokio::spawn(async move {
         loop {
-            let _ = start_election(
+            let res = start_election(
                 Arc::clone(&current_node),
                 quorom,
                 Arc::clone(&p_table),
@@ -198,11 +198,18 @@ pub async fn begin(
                 break;
             }
 
-            // start sending out leader heartbeats
-            // while listening for step down notifications
-            // if we get a step down notification
-            // break out of the heartbeat loop
-            // then restart the election process
+            match res {
+                Ok(_) => {
+                    todo!("LEADER!")
+
+                    // start sending out leader heartbeats
+                    // while listening for step down notifications
+                    // if we get a step down notification
+                    // break out of the heartbeat loop
+                    // then restart the election process
+                }
+                _ => break,
+            }
         }
     });
 
