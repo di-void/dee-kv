@@ -58,3 +58,9 @@ fn main() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+// https://docs.rs/tonic/latest/tonic/
+// https://github.com/tokio-rs/prost
+// https://github.com/hyperium/tonic/tree/master/examples
+// https://docs.rs/tokio/latest/tokio/
+// https://docs.rs/futures/latest/futures/index.html

@@ -49,8 +49,14 @@ impl CurrentNode {
     pub fn is_follower(&self) -> bool {
         self.role == NodeRole::Follower
     }
+    pub fn is_leader(&self) -> bool {
+        self.role == NodeRole::Leader
+    }
     pub fn step_down(&mut self, term: Term) {
-        self.term = term;
+        // in case of racing calls
+        if term > self.term {
+            self.term = term;
+        }
         self.role = Default::default();
     }
     pub fn from_meta(node_id: u8) -> anyhow::Result<Self> {

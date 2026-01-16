@@ -18,6 +18,15 @@ impl ConsensusSvc for ConsensusService {
         &self,
         _request: Request<RequestVoteRequest>,
     ) -> Result<Response<RequestVoteResponse>, Status> {
+        // check the candidate's term against current node
+        // if the term is greater than the current node's term
+        // step down the current node then
+        // grant vote to candidate node
+        // if the terms are equal, check if the current node has voted
+        // if it has voted and it wasn't this candidate, reject the request
+        // if it has voted and it *was* this candidate, grant vote again
+        // if the candidate's term is lower than current node's
+        // reject the request while setting the term in response to the current node's
         todo!("request vote")
     }
 
@@ -28,46 +37,25 @@ impl ConsensusSvc for ConsensusService {
         todo!("append entries");
     }
 
-    /// Handles an incoming leader assertion RPC.
-    ///
-    /// Processes a `LeaderAssertRequest` and returns a gRPC `Response` containing a `LeaderAssertResponse` that indicates whether the sender's leadership assertion is accepted. On failure, returns a gRPC `Status`.
-    ///
-    /// # Examples
-    ///
-    /// ```no_run
-    /// use tonic::Request;
-    /// use consensus_proto::LeaderAssertRequest;
-    ///
-    /// // Build service and request (fields omitted for brevity)
-    /// let svc = ConsensusService::default();
-    /// let req = Request::new(LeaderAssertRequest { /* ... */ });
-    ///
-    /// // Invoke handler (requires an async runtime)
-    /// let _ = tokio::runtime::Runtime::new().unwrap().block_on(async {
-    ///     let _ = svc.leader_assert(req).await;
-    /// });
-    /// ```
     async fn leader_assert(
         &self,
         _request: Request<LeaderAssertRequest>,
     ) -> Result<Response<LeaderAssertResponse>, Status> {
+        // reset the election timer
+        // check the term if it is greater than current node's
+        // if yes, step down this node and
+        // and return the "term echo response"
+        // if the terms are equal and current node is already a follower
+        // reset the election timer and return "term echo response"
+        // if the current node is not a follower and the terms are equal
+        // step the current node down, reset the election timer and return the response
+        // if the leader term is less than current node's term
+        // return a response with the term included
         todo!("leader assert");
     }
 }
 
 impl GrpcClientWrapper for ConsensusServiceClient<Channel> {
-    /// Creates a ConsensusServiceClient that uses the provided gRPC Channel.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tonic::transport::Channel;
-    /// use consensus_proto::consensus_service_client::ConsensusServiceClient;
-    ///
-    /// // construct a Channel (in real code this is usually awaited)
-    /// let channel = Channel::from_static("http://127.0.0.1:50051");
-    /// let _client = ConsensusServiceClient::new_client(channel);
-    /// ```
     fn new_client(inner: Channel) -> Self {
         Self::new(inner)
     }

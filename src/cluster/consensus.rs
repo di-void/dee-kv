@@ -7,6 +7,7 @@ use crate::{
 use anyhow::{Context, Result};
 use futures::stream::{FuturesUnordered, StreamExt};
 use std::sync::{Arc, atomic::Ordering};
+use std::time::Duration;
 use tokio::{
     runtime::Handle,
     sync::{RwLock, mpsc, watch},
@@ -39,92 +40,129 @@ use tonic::{Request, transport::Channel};
 /// ```
 pub async fn start_election(
     current_node: Arc<RwLock<CurrentNode>>,
-    quorom: u8,
+    quorum: u8,
     p_table: Arc<PeersTable>,
     mut csus_rx: watch::Receiver<ConsensusMessage>,
+    mut shutdown_rx: watch::Receiver<Option<()>>,
     lw: mpsc::Sender<LogWriterMsg>, // log-writer
-) {
+) -> Result<()> {
     use crate::utils::cluster::get_random_election_timeout;
 
-    loop {
-        if let Err(_) = timeout(get_random_election_timeout(), async {
-            if csus_rx.changed().await.is_ok() {
-                // reset timer conditions
-                if let ConsensusMessage::LeaderAssert | ConsensusMessage::VoteGranted =
-                    *csus_rx.borrow_and_update()
-                {
-                    return;
-                };
-            };
-        })
-        .await
-        {
-            let mut cw = current_node.write().await;
-            if cw.is_follower() {
-                // transition to candidate
-                cw.promote(); // +1 vote
-                lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
-                    .await
-                    .unwrap();
-            };
-            let (curr_term, candidate_id, mut votes) = (cw.term, cw.id, 1);
-            drop(cw);
+    'outer: loop {
+        use tokio::time::{Instant, sleep};
+        tokio::pin! { let sleep_fut = sleep(get_random_election_timeout()); }
 
-            let pt = Arc::clone(&p_table);
-            let clients = task::spawn_blocking(move || {
-                let p_table = pt;
-                create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
-            })
-            .await
-            .unwrap();
-
-            use crate::log::{LAST_LOG_INDEX, LAST_LOG_TERM};
-            let last_log_index = LAST_LOG_INDEX.load(Ordering::SeqCst);
-            let last_log_term = LAST_LOG_TERM.load(Ordering::SeqCst);
-
-            let mut futs = FuturesUnordered::new();
-
-            for (mut client, _) in clients {
-                let handle = tokio::spawn(async move {
-                    let req = Request::new(RequestVoteRequest {
-                        term: curr_term.into(),
-                        candidate_id: candidate_id.into(),
-                        last_log_index,
-                        last_log_term,
-                    });
-
-                    let res = client
-                        .request_vote(req)
-                        .await
-                        .with_context(|| format!("[FAILED REQUEST]: `request_vote`")) // TODO: include peer node id
-                        .unwrap();
-                    let vote_response = res.into_inner();
-                    if vote_response.vote_granted {
-                        true
+        loop {
+            tokio::select! {
+                _ = &mut sleep_fut => {
+                    break; // start election
+                }
+                res = csus_rx.changed() => {
+                    if res.is_ok() {
+                        match *csus_rx.borrow_and_update() {
+                            ConsensusMessage::LeaderAssert | ConsensusMessage::VoteGranted => {
+                                let next_deadline = Instant::now() + get_random_election_timeout();
+                                sleep_fut.as_mut().reset(next_deadline); // reset to a fresh deadline
+                            }
+                            _ => {}
+                        }
                     } else {
-                        panic!("VOTE DENIED!"); // TODO: include peer node id
+                        dbg!("Consensus Message Channel closed prematurely!");
+                        break 'outer; // abort election loop
                     }
-                });
-
-                futs.push(handle);
-            }
-
-            while let Some(r) = futs.next().await {
-                if r.is_ok() {
-                    votes += 1;
+                }
+                _ = shutdown_rx.changed() => {
+                    break 'outer; // graceful shutdown requested
                 }
             }
+        }
 
-            let mut cw = current_node.write().await;
-            if votes < quorom {
-                let term = cw.term;
-                cw.step_down(term);
-            } else {
-                cw.promote(); // leader
-                // start sending hearbeats for dominance
-            }
+        let mut cw = current_node.write().await;
+        if cw.is_follower() {
+            // transition to candidate
+            cw.promote(); // +1 vote
+            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                .await
+                .unwrap();
         };
+        let (curr_term, candidate_id) = (cw.term, cw.id);
+        drop(cw);
+
+        let pt = Arc::clone(&p_table);
+        let clients = task::spawn_blocking(move || {
+            let p_table = pt;
+            create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
+        })
+        .await
+        .with_context(|| format!("Failed to generate custom clients"))?;
+
+        let last_log_index = crate::log::LAST_LOG_INDEX.load(Ordering::SeqCst);
+        let last_log_term = crate::log::LAST_LOG_TERM.load(Ordering::SeqCst);
+
+        let mut futs = FuturesUnordered::new();
+
+        for (mut client, _) in clients {
+            futs.push(tokio::spawn(async move {
+                let req = Request::new(RequestVoteRequest {
+                    term: curr_term.into(),
+                    candidate_id: candidate_id.into(),
+                    last_log_index,
+                    last_log_term,
+                });
+
+                match timeout(Duration::from_secs(2), client.request_vote(req)).await {
+                    Ok(Ok(res)) => {
+                        let vote_response = res.into_inner();
+                        if vote_response.vote_granted {
+                            Ok(())
+                        } else {
+                            Err(Some(vote_response.term))
+                        }
+                    }
+                    // rpc returned error
+                    Ok(Err(_status)) => {
+                        // treat as non-fatal failure (None)
+                        Err(None)
+                    }
+                    // timeout elapsed
+                    Err(_) => Err(None),
+                }
+            }));
+        }
+
+        while let Some(res) = futs.next().await {
+            if let Ok(r) = res {
+                match r {
+                    Ok(_) => {
+                        let mut cw = current_node.write().await;
+                        cw.votes += 1;
+                        if cw.votes >= quorum {
+                            cw.promote();
+                            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                                .await
+                                .unwrap();
+                            break 'outer;
+                        }
+                    }
+                    Err(Some(peer_term)) => {
+                        let mut cw = current_node.write().await;
+                        if (peer_term as u16) > cw.term {
+                            cw.step_down(peer_term as u16);
+                            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                                .await
+                                .unwrap();
+                            break;
+                        }
+                    }
+                    Err(None) => {
+                        // RPC failure or timeout from a peer; ignore for now.
+                    }
+                }
+            }
+        }
     }
+
+    Ok(())
 }
 
 pub async fn begin(
@@ -137,7 +175,7 @@ pub async fn begin(
     ),
     _rt: Handle,
 ) -> Result<()> {
-    let (lw_tx, _sd_tx, csus_rx) = tx_rx;
+    let (lw_tx, sd_rx, csus_rx) = tx_rx;
     println!("Current Node: {:?}", &current_node);
 
     let p_table = init_peers_table(&cc.peers).await?;
@@ -145,15 +183,30 @@ pub async fn begin(
 
     let quorom = cc.quorom;
     tokio::spawn(async move {
-        start_election(
-            Arc::clone(&current_node),
-            quorom,
-            Arc::clone(&p_table),
-            csus_rx.clone(),
-            lw_tx.clone(),
-        )
-        .await;
+        loop {
+            let _ = start_election(
+                Arc::clone(&current_node),
+                quorom,
+                Arc::clone(&p_table),
+                csus_rx.clone(),
+                sd_rx.clone(),
+                lw_tx.clone(),
+            )
+            .await;
+
+            if sd_rx.borrow().is_some() {
+                break;
+            }
+
+            // start sending out leader heartbeats
+            // while listening for step down notifications
+            // if we get a step down notification
+            // break out of the heartbeat loop
+            // then restart the election process
+        }
     });
 
     Ok(())
 }
+
+// https://docs.rs/futures/latest/futures/index.html

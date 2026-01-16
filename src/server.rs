@@ -96,8 +96,3 @@ async fn issue_shutdown(
 
     Ok(())
 }
-
-// https://docs.rs/tonic/latest/tonic/
-// https://github.com/tokio-rs/prost
-// https://github.com/hyperium/tonic/tree/master/examples
-// https://docs.rs/tokio/latest/tokio/

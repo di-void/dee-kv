@@ -78,7 +78,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
             }
 
             match msg {
-                LogWriterMsg::LogAppend(m) => match m {
+                LogWriterMsg::LogAppend(op) => match op {
                     Op::Delete(key) => {
                         let log = Log::with_index(
                             LogOperation::Delete,
