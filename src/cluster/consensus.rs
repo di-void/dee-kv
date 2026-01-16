@@ -94,7 +94,7 @@ pub async fn start_election(
             create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
         })
         .await
-        .with_context(|| format!("Failed to generate custom clients"))?;
+        .with_context(|| format!("Failed to generate custom ConsensuService Clients"))?;
 
         let last_log_index = crate::log::LAST_LOG_INDEX.load(Ordering::SeqCst);
         let last_log_term = crate::log::LAST_LOG_TERM.load(Ordering::SeqCst);
