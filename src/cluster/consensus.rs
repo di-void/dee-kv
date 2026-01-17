@@ -137,10 +137,7 @@ pub async fn start_election(
                         let mut cw = current_node.write().await;
                         cw.votes += 1;
                         if cw.votes >= quorum {
-                            cw.promote();
-                            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
-                                .await
-                                .unwrap();
+                            cw.promote(); // candidate -> leader
                             break 'outer;
                         }
                     }

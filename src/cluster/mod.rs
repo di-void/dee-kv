@@ -57,6 +57,8 @@ impl CurrentNode {
         if term > self.term {
             self.term = term;
         }
+        self.votes = 0;
+        self.voted_for = None;
         self.role = Default::default();
     }
     pub fn from_meta(node_id: u8) -> anyhow::Result<Self> {
@@ -105,8 +107,6 @@ impl CurrentNode {
             }
             NodeRole::Candidate => {
                 self.role = NodeRole::Leader;
-                self.votes = 0; // reset votes
-                self.voted_for = None;
             }
             _ => {
                 dbg!("Cannot promote a Leader! Current node is already a Leader");

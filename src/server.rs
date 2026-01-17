@@ -4,7 +4,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{LogWriterMsg, cluster::CurrentNode};
+use crate::{ConsensusMessage, LogWriterMsg, cluster::CurrentNode};
 use crate::{
     consensus_proto::consensus_service_server::ConsensusServiceServer,
     health_proto::health_check_service_server::HealthCheckServiceServer,
@@ -14,16 +14,18 @@ use crate::{
 
 pub async fn start(
     addr: std::net::SocketAddr,
-    _current_node: Arc<RwLock<CurrentNode>>,
+    current_node: Arc<RwLock<CurrentNode>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
     sd_tx: watch::Sender<Option<()>>,
+    csus_tx: watch::Sender<ConsensusMessage>,
 ) -> anyhow::Result<JoinHandle<()>> {
     let handle = tokio::spawn(async move {
         println!("Server is listening on {addr}");
 
         let store_svc = StoreService::with_log_writer(lw_tx.clone());
         let health_svc = HealthCheckService::default();
-        let consensus_svc = ConsensusService::default();
+        let consensus_svc =
+            ConsensusService::with_state(Arc::clone(&current_node), lw_tx.clone(), csus_tx.clone());
 
         if let Err(e) = tonic::transport::Server::builder()
             .add_service(HealthCheckServiceServer::new(health_svc))

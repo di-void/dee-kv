@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
         let rt = rt_handle.clone();
         let (lw_tx, lw_rx) = mpsc::channel::<LogWriterMsg>(5);
         let (shd_tx, shd_rx) = watch::channel::<Option<()>>(None);
-        let (_csus_tx, csus_rx) = watch::channel(ConsensusMessage::Init);
+        let (csus_tx, csus_rx) = watch::channel(ConsensusMessage::Init);
         // initialize atomic last-log meta from on-disk logs before starting writer/server
         let (disk_term, disk_last_idx) = log::get_log_meta();
         log::init_last_log_meta(disk_term, disk_last_idx);
@@ -36,6 +36,7 @@ fn main() -> anyhow::Result<()> {
             Arc::clone(&current_node),
             lw_tx.clone(),
             shd_tx.clone(),
+            csus_tx.clone(),
         )
         .await;
 
