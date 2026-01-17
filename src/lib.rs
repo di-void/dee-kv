@@ -19,8 +19,7 @@ pub enum LogWriterMsg {
 }
 
 pub enum ConsensusMessage {
-    LeaderAssert,
-    VoteGranted,
+    ResetTimer,
     Init,
 }
 

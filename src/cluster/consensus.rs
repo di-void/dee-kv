@@ -59,12 +59,9 @@ pub async fn start_election(
                 }
                 res = csus_rx.changed() => {
                     if res.is_ok() {
-                        match *csus_rx.borrow_and_update() {
-                            ConsensusMessage::LeaderAssert | ConsensusMessage::VoteGranted => {
-                                let next_deadline = Instant::now() + get_random_election_timeout();
-                                sleep_fut.as_mut().reset(next_deadline); // reset to a fresh deadline
-                            }
-                            _ => {}
+                        if let ConsensusMessage::ResetTimer = *csus_rx.borrow_and_update() {
+                            let next_deadline = Instant::now() + get_random_election_timeout();
+                            sleep_fut.as_mut().reset(next_deadline); // reset to a fresh deadline
                         }
                     } else {
                         dbg!("Consensus Message Channel closed prematurely!");

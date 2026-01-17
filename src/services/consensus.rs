@@ -107,7 +107,7 @@ impl ConsensusSvc for ConsensusService {
                 .await;
 
             // reset election timer
-            let _ = self.csus_tx.send(ConsensusMessage::VoteGranted);
+            let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
         }
 
         let cur_term = { self.current_node.read().await.term };
@@ -127,19 +127,53 @@ impl ConsensusSvc for ConsensusService {
 
     async fn leader_assert(
         &self,
-        _request: Request<LeaderAssertRequest>,
+        request: Request<LeaderAssertRequest>,
     ) -> Result<Response<LeaderAssertResponse>, Status> {
-        // reset the election timer
-        // check the term if it is greater than current node's
-        // if yes, step down this node and
-        // and return the "term echo response"
-        // if the terms are equal and current node is already a follower
-        // reset the election timer and return "term echo response"
-        // if the current node is not a follower and the terms are equal
-        // step the current node down, reset the election timer and return the response
-        // if the leader term is less than current node's term
-        // return a response with the term included
-        todo!("leader assert");
+        let req = request.into_inner();
+        let leader_term = req.term as crate::Term;
+
+        // Reset election timer immediately to avoid unnecessary elections.
+        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
+
+        let mut need_persist = false;
+        let persist_term: crate::Term;
+        let persist_voted_for: Option<u8>;
+
+        {
+            let mut node = self.current_node.write().await;
+            if node.term > leader_term {
+                let cur = node.term;
+                drop(node);
+                return Ok(Response::new(LeaderAssertResponse {
+                    term: cur.into(),
+                    success: false,
+                }));
+            }
+
+            // If leader's term is greater or equal, step down to follower.
+            if leader_term >= node.term {
+                node.step_down(leader_term);
+                need_persist = true;
+            }
+
+            persist_term = node.term;
+            persist_voted_for = node.voted_for.clone();
+        }
+
+        if need_persist {
+            let _ = self
+                .lw_tx
+                .send(LogWriterMsg::NodeMeta(persist_term, persist_voted_for))
+                .await;
+        }
+
+        // reset timer again for good measure.
+        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
+
+        Ok(Response::new(LeaderAssertResponse {
+            term: persist_term.into(),
+            success: true,
+        }))
     }
 }
 
