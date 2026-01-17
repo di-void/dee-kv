@@ -209,7 +209,7 @@ async fn run_leader_heartbeats(
                 match timeout(Duration::from_millis(500), client.leader_assert(req)).await {
                     Ok(Ok(res)) => {
                         let resp = res.into_inner();
-                        if (resp.term as u16) > term {
+                        if resp.success {
                             Err(Some(resp.term))
                         } else {
                             Ok(())
