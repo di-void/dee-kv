@@ -1,7 +1,9 @@
 use crate::{
     ConsensusMessage, LogWriterMsg,
     cluster::{Cluster, CurrentNode, PeersTable, config::init_peers_table},
-    consensus_proto::{RequestVoteRequest, consensus_service_client::ConsensusServiceClient},
+    consensus_proto::{
+        LeaderAssertRequest, RequestVoteRequest, consensus_service_client::ConsensusServiceClient,
+    },
     services::create_custom_clients,
 };
 use anyhow::{Context, Result, anyhow};
@@ -159,6 +161,111 @@ pub async fn start_election(
     Ok(())
 }
 
+async fn run_leader_heartbeats(
+    current_node: Arc<RwLock<CurrentNode>>,
+    p_table: Arc<PeersTable>,
+    sd_rx: watch::Receiver<Option<()>>,
+    lw_tx: mpsc::Sender<LogWriterMsg>,
+) {
+    // Create per-peer clients (reuse same helper as in election)
+    let pt = Arc::clone(&p_table);
+    let clients = match task::spawn_blocking(move || {
+        let p_table = pt;
+        create_custom_clients::<ConsensusServiceClient<Channel>>(&p_table)
+    })
+    .await
+    {
+        Ok(clients) => clients,
+        Err(e) => {
+            eprintln!(
+                "Failed to generate custom ConsensusService Clients for leader: {:?}",
+                e
+            );
+            return;
+        }
+    };
+
+    // heartbeat loop
+    loop {
+        // shutdown check
+        if sd_rx.borrow().is_some() {
+            break;
+        }
+
+        // verify still leader
+        {
+            let cw = current_node.read().await;
+            if !cw.is_leader() {
+                break; // no longer leader, exit heartbeat loop
+            }
+        }
+
+        // capture current term
+        let curr_term = {
+            let cw = current_node.read().await;
+            cw.term
+        };
+
+        let mut futs = FuturesUnordered::new();
+
+        for (client, _) in &clients {
+            let mut client = client.clone();
+            let term = curr_term;
+
+            futs.push(tokio::spawn(async move {
+                let req = Request::new(LeaderAssertRequest { term: term.into() });
+
+                match timeout(Duration::from_millis(500), client.leader_assert(req)).await {
+                    Ok(Ok(res)) => {
+                        let resp = res.into_inner();
+                        if (resp.term as u16) > term {
+                            Err(Some(resp.term))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                    Ok(Err(_status)) => Err(None),
+                    Err(_) => Err(None),
+                }
+            }));
+        }
+
+        let mut step_down_term: Option<u32> = None;
+
+        while let Some(res) = futs.next().await {
+            if let Ok(r) = res {
+                match r {
+                    Ok(_) => {}
+                    Err(Some(peer_term)) => {
+                        step_down_term = Some(peer_term);
+                        break;
+                    }
+                    Err(None) => {}
+                }
+            }
+        }
+
+        if let Some(peer_term) = step_down_term {
+            // step down and persist node meta
+            let mut cw = current_node.write().await;
+            if (peer_term as u16) > cw.term {
+                cw.step_down(peer_term as u16);
+                lw_tx
+                    .send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                    .await
+                    .unwrap();
+            }
+            break; // exit heartbeat loop to re-enter election cycle
+        }
+
+        // sleep until next heartbeat round
+        tokio::time::sleep(std::time::Duration::from_millis(
+            crate::cluster::LEADER_HEARTBEAT_INTERVAL_MS as u64,
+        ))
+        .await;
+    }
+}
+
 pub async fn begin(
     cc: &Cluster,
     current_node: Arc<RwLock<CurrentNode>>,
@@ -194,13 +301,13 @@ pub async fn begin(
 
             match res {
                 Ok(_) => {
-                    todo!("LEADER!")
-
-                    // start sending out leader heartbeats
-                    // while listening for step down notifications
-                    // if we get a step down notification
-                    // break out of the heartbeat loop
-                    // then restart the election process
+                    run_leader_heartbeats(
+                        Arc::clone(&current_node),
+                        Arc::clone(&p_table),
+                        sd_rx.clone(),
+                        lw_tx.clone(),
+                    )
+                    .await;
                 }
                 _ => break,
             }
