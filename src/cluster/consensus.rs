@@ -167,7 +167,6 @@ async fn run_leader_heartbeats(
     sd_rx: watch::Receiver<Option<()>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
 ) {
-    // Create per-peer clients (reuse same helper as in election)
     let pt = Arc::clone(&p_table);
     let clients = match task::spawn_blocking(move || {
         let p_table = pt;
@@ -190,14 +189,6 @@ async fn run_leader_heartbeats(
         // shutdown check
         if sd_rx.borrow().is_some() {
             break;
-        }
-
-        // verify still leader
-        {
-            let cw = current_node.read().await;
-            if !cw.is_leader() {
-                break; // no longer leader, exit heartbeat loop
-            }
         }
 
         // capture current term
