@@ -10,6 +10,18 @@ use tokio::{
 };
 
 fn main() -> anyhow::Result<()> {
+    // Initialize tracing subscriber for structured logging
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"))
+        )
+        .with_target(true)
+        .with_thread_ids(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
+
     let rt = Runtime::new()?;
     let args = env::parse_cli_args()?;
     let env_vars = env::get_env_vars();
@@ -31,6 +43,13 @@ fn main() -> anyhow::Result<()> {
         let lw_handle = log::init_log_writer(current_node.term, lw_rx);
         let current_node = Arc::new(RwLock::new(current_node));
 
+        tracing::info!(
+            node_id = cluster.self_id,
+            address = %cluster.self_address,
+            cluster_name = %cluster.name,
+            "Starting dee-kv node"
+        );
+
         let server_handle = server::start(
             cluster.self_address.clone(),
             Arc::clone(&current_node),
@@ -42,18 +61,20 @@ fn main() -> anyhow::Result<()> {
 
         match server_handle {
             Ok(s) => {
-                let _ = consensus::begin(
+                if let Err(_) = consensus::begin(
                     &cluster,
                     Arc::clone(&current_node),
                     (lw_tx.clone(), shd_rx.clone(), csus_rx.clone()),
                     rt,
                 )
-                .await;
+                .await {
+                    tracing::error!("Error while starting consensus");
+                };
 
                 s.await.unwrap();
                 lw_handle.join().expect("log writer thread errored");
             }
-            Err(e) => println!("Error while starting server: {:?}", e),
+            Err(e) => tracing::error!(error = ?e, "Error while starting server"),
         }
     });
 

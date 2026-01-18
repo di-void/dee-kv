@@ -20,7 +20,7 @@ pub async fn start(
     csus_tx: watch::Sender<ConsensusMessage>,
 ) -> anyhow::Result<JoinHandle<()>> {
     let handle = tokio::spawn(async move {
-        println!("Server is listening on {addr}");
+        tracing::info!(address = %addr, "Server is listening");
 
         let store_svc = StoreService::with_log_writer(lw_tx.clone());
         let health_svc = HealthCheckService::default();
@@ -39,7 +39,7 @@ pub async fn start(
             })
             .await
         {
-            println!("Failed to start server: {:?}", e);
+            tracing::error!(error = ?e, "Failed to start server");
         }
     });
 
@@ -54,7 +54,7 @@ async fn shutdown_server(
     use tokio::signal;
     let mut ctrlc = signal::windows::ctrl_c()?;
     ctrlc.recv().await;
-    println!("Shutting down server...");
+    tracing::info!("Received Ctrl-C signal, shutting down server");
 
     Ok(issue_shutdown(&lw_tx, &s_tx).await?)
 }
@@ -71,15 +71,15 @@ async fn shutdown_server(
 
     let res = tokio::select! {
         _ = sig_term.recv() => {
-            println!("Received SIGTERM. Shutting down..");
+            tracing::info!("Received SIGTERM, shutting down server");
             Ok(issue_shutdown(&lw_tx, &s_tx).await?)
         }
         _ = sig_hup.recv() => {
-            println!("Received SIGHUP. Shutting down..");
+            tracing::info!("Received SIGHUP, shutting down server");
             Ok(issue_shutdown(&lw_tx, &s_tx).await?)
         }
         _ = sig_int.recv() => {
-            println!("Received SIGINT. Shutting down..");
+            tracing::info!("Received SIGINT, shutting down server");
             Ok(issue_shutdown(&lw_tx, &s_tx).await?)
         }
     };
@@ -93,7 +93,7 @@ async fn issue_shutdown(
 ) -> anyhow::Result<()> {
     lw_tx.send(LogWriterMsg::ShutDown).await?; // shutdown log writer
     if let Err(e) = s_tx.send(Some(())) {
-        println!("Failed to send shutdown message: {:?}", e);
+        tracing::error!(error = ?e, "Failed to send shutdown message");
     };
 
     Ok(())

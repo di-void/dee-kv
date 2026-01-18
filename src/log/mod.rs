@@ -56,15 +56,15 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
         let mut log_w = match LogWriter::with_data_dir(DATA_DIR) {
             Ok(lw) => lw,
             Err(e) => {
-                println!(
-                    "Failed to initalize Log writer!.\n Error: {:#?}\n\n Killing writer thread!",
-                    e
+                tracing::error!(
+                    error = ?e,
+                    "Failed to initialize log writer, killing writer thread"
                 );
                 panic!("Writer thread panicked on startup!");
             }
         };
 
-        println!("Writer thread has started!");
+        tracing::info!("Log writer thread started");
 
         let mut now = Instant::now();
         let mut check_delta = false;
@@ -106,7 +106,12 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         // increment index after successful append
                         next_index = next_index.saturating_add(1);
 
-                        println!("LogWriter wrote {b} bytes for {:?}", Op::Delete(key));
+                        tracing::debug!(
+                            bytes = b,
+                            index = next_index - 1,
+                            term = term,
+                            "Wrote Delete operation to log"
+                        );
                     }
                     Op::Put(key, val) => {
                         let log = Log::with_index(
@@ -136,9 +141,11 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
                         next_index = next_index.saturating_add(1);
 
-                        println!(
-                            "LogWriter wrote {b} bytes for {:?}",
-                            Op::Put(key, val.into())
+                        tracing::debug!(
+                            bytes = b,
+                            index = next_index - 1,
+                            term = term,
+                            "Wrote Put operation to log"
                         );
                     }
                 },
@@ -153,21 +160,26 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         .serialize()
                         .with_context(|| format!("Failed to serliaze meta object: {:?}", meta))
                         .unwrap();
+
+                        println!("Payload: {}", &payload);
+
                     let b = log_w
                         .write_meta(payload.as_bytes())
                         .with_context(|| format!("Failed to write to meta file"))
                         .unwrap();
 
-                    println!(
-                        "LogWriter wrote {b} bytes for {{ current_term: {:?}, voted_for: {:?} }} to meta file",
-                        current_term, voted_for
+                    tracing::debug!(
+                        bytes = b,
+                        current_term = current_term,
+                        voted_for = ?voted_for,
+                        "Wrote node metadata to meta file"
                     );
                 }
                 LogWriterMsg::ShutDown => break,
             }
         }
 
-        println!("Shutting down log writer..");
+        tracing::info!("Log writer thread shutting down");
     });
 
     handle
@@ -191,12 +203,12 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
 /// ```
 pub fn load_store(path: &Path) -> Result<HashMap<String, Types>> {
     let mut hash: HashMap<String, Types> = HashMap::new();
-    println!("Rebuilding map..");
+    tracing::info!("Rebuilding store from log files");
     let files = get_log_files(path)?;
-    println!("Replaying logs..");
+    tracing::debug!(file_count = files.len(), "Replaying log files");
     for file in files {
         replay_log_file(file.clone(), &mut hash)?;
-        println!("Done replaying log file: {:?}", file);
+        tracing::debug!(file_path = ?file, "Replayed log file");
     }
 
     Ok(hash)

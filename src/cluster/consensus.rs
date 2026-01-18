@@ -40,6 +40,7 @@ use tonic::{Request, transport::Channel};
 /// // Spawn the election loop (arguments omitted for brevity).
 /// // tokio::spawn(start_election(current_node, quorom, p_table, csus_rx, lw));
 /// ```
+#[tracing::instrument(skip_all, fields(quorum = quorum))]
 pub async fn start_election(
     current_node: Arc<RwLock<CurrentNode>>,
     quorum: u8,
@@ -57,6 +58,7 @@ pub async fn start_election(
         loop {
             tokio::select! {
                 _ = &mut sleep_fut => {
+                    tracing::debug!("Election timeout elapsed, starting election");
                     break; // start election
                 }
                 res = csus_rx.changed() => {
@@ -66,7 +68,7 @@ pub async fn start_election(
                             sleep_fut.as_mut().reset(next_deadline); // reset to a fresh deadline
                         }
                     } else {
-                        dbg!("Consensus Message Channel closed prematurely!");
+                        tracing::error!("Consensus message channel closed prematurely");
                         return Err(anyhow!("Aborted Election!")); // abort election loop
                     }
                 }
@@ -80,6 +82,11 @@ pub async fn start_election(
         if cw.is_follower() {
             // transition to candidate
             cw.promote(); // +1 vote
+            tracing::info!(
+                node_id = cw.id,
+                term = cw.term,
+                "Transitioned to Candidate, requesting votes"
+            );
             lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
                 .await
                 .unwrap();
@@ -135,14 +142,33 @@ pub async fn start_election(
                     Ok(_) => {
                         let mut cw = current_node.write().await;
                         cw.votes += 1;
+                        tracing::debug!(
+                            node_id = cw.id,
+                            term = cw.term,
+                            votes = cw.votes,
+                            quorum = quorum,
+                            "Vote granted"
+                        );
                         if cw.votes >= quorum {
                             cw.promote(); // candidate -> leader
+                            tracing::info!(
+                                node_id = cw.id,
+                                term = cw.term,
+                                votes = cw.votes,
+                                "Quorum achieved, transitioning to Leader"
+                            );
                             break 'outer;
                         }
                     }
                     Err(Some(peer_term)) => {
                         let mut cw = current_node.write().await;
                         if (peer_term as u16) > cw.term {
+                            tracing::info!(
+                                node_id = cw.id,
+                                current_term = cw.term,
+                                peer_term = peer_term,
+                                "Discovered higher term, stepping down to Follower"
+                            );
                             cw.step_down(peer_term as u16);
                             lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
                                 .await
@@ -161,6 +187,7 @@ pub async fn start_election(
     Ok(())
 }
 
+#[tracing::instrument(skip_all)]
 async fn run_leader_heartbeats(
     current_node: Arc<RwLock<CurrentNode>>,
     p_table: Arc<PeersTable>,
@@ -176,9 +203,9 @@ async fn run_leader_heartbeats(
     {
         Ok(clients) => clients,
         Err(e) => {
-            eprintln!(
-                "Failed to generate custom ConsensusService Clients for leader: {:?}",
-                e
+            tracing::error!(
+                error = ?e,
+                "Failed to generate custom ConsensusService clients for leader"
             );
             return;
         }
@@ -192,10 +219,12 @@ async fn run_leader_heartbeats(
         }
 
         // capture current term
-        let curr_term = {
+        let (curr_term, node_id) = {
             let cw = current_node.read().await;
-            cw.term
+            (cw.term, cw.id)
         };
+        
+        tracing::debug!(node_id = node_id, term = curr_term, "Sending heartbeats to peers");
 
         let mut futs = FuturesUnordered::new();
 
@@ -240,6 +269,12 @@ async fn run_leader_heartbeats(
             // step down and persist node meta
             let mut cw = current_node.write().await;
             if (peer_term as u16) > cw.term {
+                tracing::info!(
+                    node_id = cw.id,
+                    current_term = cw.term,
+                    peer_term = peer_term,
+                    "Leader discovered higher term, stepping down to Follower"
+                );
                 cw.step_down(peer_term as u16);
                 lw_tx
                     .send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
@@ -257,6 +292,7 @@ async fn run_leader_heartbeats(
     }
 }
 
+#[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
 pub async fn begin(
     cc: &Cluster,
     current_node: Arc<RwLock<CurrentNode>>,
@@ -268,7 +304,19 @@ pub async fn begin(
     _rt: Handle,
 ) -> Result<()> {
     let (lw_tx, sd_rx, csus_rx) = tx_rx;
-    println!("Current Node: {:?}", &current_node);
+    
+    let (node_id, term, role) = {
+        let cn = current_node.read().await;
+        (cn.id, cn.term, format!("{:?}", cn.role))
+    };
+    
+    tracing::info!(
+        node_id = node_id,
+        term = term,
+        role = %role,
+        quorum = cc.quorom,
+        "Starting consensus protocol"
+    );
 
     let p_table = init_peers_table(&cc.peers).await?;
     let p_table = Arc::new(p_table);

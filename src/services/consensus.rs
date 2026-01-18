@@ -45,6 +45,12 @@ impl ConsensusSvc for ConsensusService {
         let candidate_id = req.candidate_id as u8;
         let candidate_last_term = req.last_log_term;
         let candidate_last_index = req.last_log_index;
+        
+        tracing::debug!(
+            candidate_id = candidate_id,
+            candidate_term = candidate_term,
+            "Received vote request"
+        );
 
         {
             let node = self.current_node.read().await;
@@ -95,6 +101,11 @@ impl ConsensusSvc for ConsensusService {
         }
 
         if vote_granted {
+            tracing::info!(
+                candidate_id = candidate_id,
+                candidate_term = candidate_term,
+                "Vote granted to candidate"
+            );
             // persist node meta
             let node = self.current_node.read().await;
             let persist_term = node.term;
@@ -109,8 +120,16 @@ impl ConsensusSvc for ConsensusService {
             // reset election timer
             let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
         }
-
+        
         let cur_term = { self.current_node.read().await.term };
+        
+        if !vote_granted {
+            tracing::debug!(
+                candidate_id = candidate_id,
+                candidate_term = candidate_term,
+                "Vote denied to candidate"
+            );
+        }
 
         Ok(Response::new(RequestVoteResponse {
             term: cur_term.into(),
@@ -131,6 +150,8 @@ impl ConsensusSvc for ConsensusService {
     ) -> Result<Response<LeaderAssertResponse>, Status> {
         let req = request.into_inner();
         let leader_term = req.term as crate::Term;
+        
+        tracing::debug!(leader_term = leader_term, "Received leader heartbeat");
 
         // Reset election timer immediately to avoid unnecessary elections.
         let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);

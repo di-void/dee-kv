@@ -104,12 +104,25 @@ impl CurrentNode {
                 self.term += 1;
                 self.votes = 1;
                 self.voted_for = Some(self.id);
+                tracing::debug!(
+                    node_id = self.id,
+                    term = self.term,
+                    "Promoted from Follower to Candidate"
+                );
             }
             NodeRole::Candidate => {
                 self.role = NodeRole::Leader;
+                tracing::info!(
+                    node_id = self.id,
+                    term = self.term,
+                    "Promoted from Candidate to Leader"
+                );
             }
             _ => {
-                dbg!("Cannot promote a Leader! Current node is already a Leader");
+                tracing::warn!(
+                    node_id = self.id,
+                    "Cannot promote a Leader, already in Leader role"
+                );
             }
         };
     }

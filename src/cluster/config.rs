@@ -106,18 +106,20 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
                     role: Default::default(),
                 };
 
-                println!(
-                    "Succesfully initialized peer: {{ id: {}, last_ping: {:?}, status: {:?}, state: {:?} }}",
-                    peer.id, &peer.last_ping, &peer.status, &peer.role
+                tracing::info!(
+                    peer_id = peer.id,
+                    status = ?peer.status,
+                    "Successfully initialized peer connection"
                 );
 
                 let peer = Arc::new(Mutex::new(peer));
                 peers.push(peer);
             }
             Err(e) => {
-                println!(
-                    "Failed to create channel for Node: {}. Error: {:?}\n Defaulting to lazy channel and retrying...",
-                    n.id, e
+                tracing::warn!(
+                    peer_id = n.id,
+                    error = ?e,
+                    "Failed to create channel for peer, defaulting to lazy channel and retrying"
                 );
 
                 peer = Peer {
@@ -129,14 +131,16 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
                 };
 
                 for i in 1..=3 {
-                    println!("Retry attempt: {i}");
+                    tracing::debug!(peer_id = n.id, attempt = i, "Retrying peer connection");
                     if let Ok(channel) = builder.create_channel().await {
                         peer.channel = channel;
                         peer.last_ping = Instant::now();
                         peer.status = PeerStatus::Alive;
+                        tracing::info!(peer_id = n.id, "Peer connection established on retry");
+                        break;
                     }
 
-                    println!("Failed to create channel. Trying again in 2 secs.");
+                    tracing::debug!("Failed to create channel, trying again in 2 secs");
                     sleep(Duration::from_millis(2000)).await
                 }
 
