@@ -104,7 +104,7 @@ impl CurrentNode {
                 self.term += 1;
                 self.votes = 1;
                 self.voted_for = Some(self.id);
-                tracing::debug!(
+                tracing::info!(
                     node_id = self.id,
                     term = self.term,
                     "Promoted from Follower to Candidate"

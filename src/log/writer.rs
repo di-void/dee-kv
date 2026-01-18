@@ -1,5 +1,6 @@
 use crate::{
-    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_FILE_FLUSH_LIMIT, META_FILE_PATH,
+    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_FILE_FLUSH_LIMIT, META_FILE_FLUSH_WRITES,
+    META_FILE_PATH,
     log::file::{
         CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
         open_file, open_or_create_file, validate_or_create_dir,
@@ -9,13 +10,60 @@ use crate::{
 use anyhow::{Context, Result};
 use std::{
     fs::File,
-    io::{BufWriter, Write},
+    io::{BufWriter, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
+/// A fixed-size buffer for meta writes that overwrites its contents on each write
+/// and periodically flushes to disk by overwriting the file.
+pub struct MetaBuffer {
+    file: File,
+    buffer: Vec<u8>,
+    len: usize,
+    write_count: u16,
+    flush_threshold: u16,
+}
+
+impl MetaBuffer {
+    pub fn new(file: File, capacity: usize, flush_threshold: u16) -> Self {
+        Self {
+            file,
+            buffer: vec![0u8; capacity],
+            len: 0,
+            write_count: 0,
+            flush_threshold,
+        }
+    }
+
+    /// Overwrites the buffer with the given payload.
+    /// If payload is larger than buffer capacity, it will be truncated.
+    pub fn write(&mut self, payload: &[u8]) -> usize {
+        let bytes_to_write = payload.len().min(self.buffer.len());
+        self.buffer[..bytes_to_write].copy_from_slice(&payload[..bytes_to_write]);
+        self.len = bytes_to_write;
+        self.write_count += 1;
+        bytes_to_write
+    }
+
+    /// Returns true if the write count has reached the flush threshold.
+    pub fn should_flush(&self) -> bool {
+        self.write_count >= self.flush_threshold
+    }
+
+    /// Flushes the buffer to disk by seeking to the start and overwriting.
+    pub fn flush(&mut self) -> std::io::Result<()> {
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file.write_all(&self.buffer[..self.len])?;
+        self.file.set_len(self.len as u64)?; // Truncate file to current content size
+        self.file.sync_all()?;
+        self.write_count = 0;
+        Ok(())
+    }
+}
+
 pub struct LogWriter {
     curr_log_file: BufWriter<File>,
-    meta_file: BufWriter<File>,
+    meta_buffer: MetaBuffer,
     data_dir_path: PathBuf,
 }
 
@@ -40,11 +88,17 @@ impl LogWriter {
         Ok(bytes)
     }
 
+    /// Writes metadata by overwriting the in-memory buffer.
+    /// Flushes to disk after `META_FILE_FLUSH_WRITES` writes.
     pub fn write_meta(&mut self, payload: &[u8]) -> Result<usize> {
-        let bytes = self
-            .meta_file
-            .write(payload)
-            .with_context(|| format!("Failed to write meta file writing: {:?}", payload))?;
+        let bytes = self.meta_buffer.write(payload);
+        
+        if self.meta_buffer.should_flush() {
+            self.meta_buffer
+                .flush()
+                .with_context(|| "Failed to flush meta buffer to disk")?;
+        }
+        
         Ok(bytes)
     }
 
@@ -87,7 +141,11 @@ impl LogWriter {
 
         Ok(Self {
             curr_log_file: BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), log_file),
-            meta_file: BufWriter::with_capacity(META_FILE_FLUSH_LIMIT.into(), meta_file),
+            meta_buffer: MetaBuffer::new(
+                meta_file,
+                META_FILE_FLUSH_LIMIT.into(),
+                META_FILE_FLUSH_WRITES,
+            ),
             data_dir_path: data_dir_path.to_path_buf(),
         })
     }
@@ -100,7 +158,7 @@ impl Drop for LogWriter {
             Err(e) => println!("[LOG WRITER]: An error occurred while flushing: {:?}", e),
         }
 
-        match self.meta_file.flush() {
+        match self.meta_buffer.flush() {
             Ok(_) => println!("[META FILE]: Flushed buffer successfully!"),
             Err(e) => println!("[META FILE]: An error occurred while flushing: {:?}", e),
         }

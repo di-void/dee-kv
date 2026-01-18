@@ -161,8 +161,6 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         .with_context(|| format!("Failed to serliaze meta object: {:?}", meta))
                         .unwrap();
 
-                        println!("Payload: {}", &payload);
-
                     let b = log_w
                         .write_meta(payload.as_bytes())
                         .with_context(|| format!("Failed to write to meta file"))

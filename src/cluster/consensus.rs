@@ -58,7 +58,7 @@ pub async fn start_election(
         loop {
             tokio::select! {
                 _ = &mut sleep_fut => {
-                    tracing::debug!("Election timeout elapsed, starting election");
+                    tracing::info!("Election timeout elapsed, starting election");
                     break; // start election
                 }
                 res = csus_rx.changed() => {
@@ -142,12 +142,12 @@ pub async fn start_election(
                     Ok(_) => {
                         let mut cw = current_node.write().await;
                         cw.votes += 1;
-                        tracing::debug!(
+                        tracing::info!(
                             node_id = cw.id,
                             term = cw.term,
                             votes = cw.votes,
                             quorum = quorum,
-                            "Vote granted"
+                            "Received vote"
                         );
                         if cw.votes >= quorum {
                             cw.promote(); // candidate -> leader
