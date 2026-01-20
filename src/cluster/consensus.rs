@@ -94,6 +94,11 @@ pub async fn start_election(
         let (curr_term, candidate_id) = (cw.term, cw.id);
         drop(cw);
 
+        // // Prevent non-followers from sending RequestVote RPCs
+        // if !current_node.read().await.is_follower() {
+        //     return Ok(());
+        // }
+
         let pt = Arc::clone(&p_table);
         let clients = task::spawn_blocking(move || {
             let p_table = pt;
@@ -116,7 +121,7 @@ pub async fn start_election(
                     last_log_term,
                 });
 
-                match timeout(Duration::from_secs(2), client.request_vote(req)).await {
+                match timeout(Duration::from_millis(500), client.request_vote(req)).await {
                     Ok(Ok(res)) => {
                         let vote_response = res.into_inner();
                         if vote_response.vote_granted {
@@ -207,6 +212,14 @@ async fn run_leader_heartbeats(
                 error = ?e,
                 "Failed to generate custom ConsensusService clients for leader"
             );
+            // Step down on client creation failure to prevent invalid election attempts
+            let mut cw = current_node.write().await;
+            let current_term = cw.term;
+            cw.step_down(current_term);
+            lw_tx
+                .send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                .await
+                .unwrap();
             return;
         }
     };
@@ -218,13 +231,24 @@ async fn run_leader_heartbeats(
             break;
         }
 
+        {
+            let cw = current_node.read().await;
+            if !cw.is_leader() {
+                break;
+            }
+        }
+
         // capture current term
         let (curr_term, node_id) = {
             let cw = current_node.read().await;
             (cw.term, cw.id)
         };
-        
-        tracing::debug!(node_id = node_id, term = curr_term, "Sending heartbeats to peers");
+
+        tracing::debug!(
+            node_id = node_id,
+            term = curr_term,
+            "Sending heartbeats to peers"
+        );
 
         let mut futs = FuturesUnordered::new();
 
@@ -235,13 +259,13 @@ async fn run_leader_heartbeats(
             futs.push(tokio::spawn(async move {
                 let req = Request::new(LeaderAssertRequest { term: term.into() });
 
-                match timeout(Duration::from_millis(500), client.leader_assert(req)).await {
+                match timeout(Duration::from_millis(300), client.leader_assert(req)).await {
                     Ok(Ok(res)) => {
                         let resp = res.into_inner();
                         if resp.success {
-                            Err(Some(resp.term))
-                        } else {
                             Ok(())
+                        } else {
+                            Err(Some(resp.term))
                         }
                     }
                     Ok(Err(_status)) => Err(None),
@@ -290,6 +314,8 @@ async fn run_leader_heartbeats(
         ))
         .await;
     }
+
+    println!("Leader exited heartbeat loop");
 }
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
@@ -304,12 +330,12 @@ pub async fn begin(
     _rt: Handle,
 ) -> Result<()> {
     let (lw_tx, sd_rx, csus_rx) = tx_rx;
-    
+
     let (node_id, term, role) = {
         let cn = current_node.read().await;
         (cn.id, cn.term, format!("{:?}", cn.role))
     };
-    
+
     tracing::info!(
         node_id = node_id,
         term = term,

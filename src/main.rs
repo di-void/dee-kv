@@ -14,7 +14,7 @@ fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,dee_kv=debug"))
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info,dee_kv=debug")),
         )
         .with_target(true)
         .with_thread_ids(false)
@@ -67,7 +67,8 @@ fn main() -> anyhow::Result<()> {
                     (lw_tx.clone(), shd_rx.clone(), csus_rx.clone()),
                     rt,
                 )
-                .await {
+                .await
+                {
                     tracing::error!("Error while starting consensus");
                 };
 

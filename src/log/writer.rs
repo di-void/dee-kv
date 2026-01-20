@@ -1,5 +1,5 @@
 use crate::{
-    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_FILE_FLUSH_LIMIT, META_FILE_FLUSH_WRITES,
+    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
     META_FILE_PATH,
     log::file::{
         CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
@@ -14,8 +14,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// A fixed-size buffer for meta writes that overwrites its contents on each write
-/// and periodically flushes to disk by overwriting the file.
+/// A buffer for meta writes that overwrites its contents on each write,
+/// grows dynamically as needed, and periodically flushes to disk by overwriting the file.
 pub struct MetaBuffer {
     file: File,
     buffer: Vec<u8>,
@@ -35,11 +35,13 @@ impl MetaBuffer {
         }
     }
 
-    /// Overwrites the buffer with the given payload.
-    /// If payload is larger than buffer capacity, it will be truncated.
+    /// Overwrites the buffer with the given payload, resizing if necessary.
     pub fn write(&mut self, payload: &[u8]) -> usize {
-        let bytes_to_write = payload.len().min(self.buffer.len());
-        self.buffer[..bytes_to_write].copy_from_slice(&payload[..bytes_to_write]);
+        if payload.len() > self.buffer.len() {
+            self.buffer.resize(payload.len(), 0);
+        }
+        let bytes_to_write = payload.len();
+        self.buffer[..bytes_to_write].copy_from_slice(payload);
         self.len = bytes_to_write;
         self.write_count += 1;
         bytes_to_write
@@ -92,13 +94,11 @@ impl LogWriter {
     /// Flushes to disk after `META_FILE_FLUSH_WRITES` writes.
     pub fn write_meta(&mut self, payload: &[u8]) -> Result<usize> {
         let bytes = self.meta_buffer.write(payload);
-        
         if self.meta_buffer.should_flush() {
             self.meta_buffer
                 .flush()
                 .with_context(|| "Failed to flush meta buffer to disk")?;
         }
-        
         Ok(bytes)
     }
 
@@ -143,7 +143,7 @@ impl LogWriter {
             curr_log_file: BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), log_file),
             meta_buffer: MetaBuffer::new(
                 meta_file,
-                META_FILE_FLUSH_LIMIT.into(),
+                META_BUF_CAPACITY.into(),
                 META_FILE_FLUSH_WRITES,
             ),
             data_dir_path: data_dir_path.to_path_buf(),

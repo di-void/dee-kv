@@ -45,7 +45,7 @@ impl ConsensusSvc for ConsensusService {
         let candidate_id = req.candidate_id as u8;
         let candidate_last_term = req.last_log_term;
         let candidate_last_index = req.last_log_index;
-        
+
         tracing::debug!(
             candidate_id = candidate_id,
             candidate_term = candidate_term,
@@ -76,7 +76,7 @@ impl ConsensusSvc for ConsensusService {
         // log up-to-date check (compare term then index)
         let local_last_term = crate::log::get_last_log_term() as u32;
         let local_last_index = crate::log::get_last_log_index();
-        let up_to_date = if candidate_last_term > local_last_term {
+        let _up_to_date = if candidate_last_term > local_last_term {
             true
         } else if candidate_last_term < local_last_term {
             false
@@ -92,10 +92,10 @@ impl ConsensusSvc for ConsensusService {
             }
             if candidate_term >= node.term {
                 if node.voted_for.is_none() || node.voted_for == Some(candidate_id) {
-                    if up_to_date {
-                        node.voted_for = Some(candidate_id);
-                        vote_granted = true;
-                    }
+                    // if up_to_date {
+                    // }
+                    node.voted_for = Some(candidate_id);
+                    vote_granted = true;
                 }
             }
         }
@@ -120,9 +120,9 @@ impl ConsensusSvc for ConsensusService {
             // reset election timer
             let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
         }
-        
+
         let cur_term = { self.current_node.read().await.term };
-        
+
         if !vote_granted {
             tracing::debug!(
                 candidate_id = candidate_id,
@@ -150,7 +150,7 @@ impl ConsensusSvc for ConsensusService {
     ) -> Result<Response<LeaderAssertResponse>, Status> {
         let req = request.into_inner();
         let leader_term = req.term as crate::Term;
-        
+
         tracing::debug!(leader_term = leader_term, "Received leader heartbeat");
 
         // Reset election timer immediately to avoid unnecessary elections.
@@ -172,7 +172,7 @@ impl ConsensusSvc for ConsensusService {
             }
 
             // If leader's term is greater or equal, step down to follower.
-            if leader_term >= node.term {
+            if leader_term >= node.term && !node.is_follower() {
                 node.step_down(leader_term);
                 need_persist = true;
             }

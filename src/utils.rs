@@ -30,7 +30,7 @@ pub mod cluster {
     use std::time::Duration;
 
     pub fn get_random_election_timeout() -> Duration {
-        let val = super::get_random_value(150..301);
+        let val = super::get_random_value(500..1000);
         Duration::from_millis(val.into())
     }
 }
