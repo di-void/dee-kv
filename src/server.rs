@@ -54,7 +54,6 @@ async fn shutdown_server(
     use tokio::signal;
     let mut ctrlc = signal::windows::ctrl_c()?;
     ctrlc.recv().await;
-    tracing::info!("Received Ctrl-C signal, shutting down server");
 
     Ok(issue_shutdown(&lw_tx, &s_tx).await?)
 }

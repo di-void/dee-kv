@@ -314,8 +314,6 @@ async fn run_leader_heartbeats(
         ))
         .await;
     }
-
-    println!("Leader exited heartbeat loop");
 }
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
