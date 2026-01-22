@@ -101,12 +101,14 @@ impl CurrentNode {
         match self.role {
             NodeRole::Follower => {
                 self.role = NodeRole::Candidate;
+                let prev_term = self.term;
                 self.term += 1;
                 self.votes = 1;
                 self.voted_for = Some(self.id);
                 tracing::info!(
                     node_id = self.id,
                     term = self.term,
+                    prev_term = prev_term,
                     "Promoted from Follower to Candidate"
                 );
             }

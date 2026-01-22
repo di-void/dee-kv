@@ -154,6 +154,15 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         current_term,
                         voted_for,
                     };
+
+                    if current_term != term {
+                        tracing::info!(
+                            prev_term = term,
+                            term = current_term,
+                            voted_for = ?voted_for,
+                            "Persisting updated term to meta store"
+                        );
+                    }
                     term = current_term;
 
                     let payload = meta
@@ -166,12 +175,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         .with_context(|| format!("Failed to write to meta file"))
                         .unwrap();
 
-                    tracing::debug!(
-                        bytes = b,
-                        current_term = current_term,
-                        voted_for = ?voted_for,
-                        "Wrote node metadata to meta file"
-                    );
+                    tracing::debug!(bytes = b, "Wrote node metadata to meta file");
                 }
                 LogWriterMsg::ShutDown => break,
             }
