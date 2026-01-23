@@ -141,6 +141,8 @@ impl ConsensusSvc for ConsensusService {
         &self,
         _request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
+        // if current node's term is greater than incoming term
+        // reject the request with current node's term
         todo!("append entries");
     }
 
