@@ -141,8 +141,22 @@ impl ConsensusSvc for ConsensusService {
         &self,
         _request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
-        // if current node's term is greater than incoming term
+        // if leader term is less than current node's
         // reject the request with current node's term
+        // if we don't have an entry at prev_log_idx
+        // we reject the request by following either of the paths below
+        // -- to the local last log index + 1 and leave conflict term unset
+        // -- or if we have the log entry at that index but the terms don't match
+        // -- set the conflict index and conflict term to
+        // -- index and term from the entry
+        // if all above checks pass, we can safely try applying the provided entries
+        // first we truncate our log to remove all entries after prev_log_idx
+        // then if the supplied entry list is empty, it is a hearbeat
+        // so we return a success response immediately
+        // if there are entries, we append each of them to our log
+        // then set our local commit index to at most the leader commit
+        // we then add these new entries to our state machine
+        // and finally return a success response
         todo!("append entries");
     }
 
