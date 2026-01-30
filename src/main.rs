@@ -43,6 +43,10 @@ fn main() -> anyhow::Result<()> {
         let lw_handle = log::init_log_writer(current_node.term, lw_rx);
         let current_node = Arc::new(RwLock::new(current_node));
 
+        if let Err(e) = log::ensure_sentinel_entry(&lw_tx).await {
+            tracing::error!(error = ?e, "Failed to ensure sentinel log entry");
+        }
+
         tracing::info!(
             node_id = cluster.self_id,
             address = %cluster.self_address,

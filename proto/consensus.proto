@@ -46,6 +46,8 @@ message AppendEntriesRequest {
 message AppendEntriesResponse {
   uint32 term = 1;
   bool success = 2;
+  optional uint32 conflict_term = 3;
+  uint32 conflict_index = 4;
 }
 
 // raft

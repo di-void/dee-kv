@@ -2,19 +2,20 @@ mod file;
 mod writer;
 
 use crate::{
-    LOG_FILE_CHECK_TIMEOUT,
-    log::file::{get_log_files, replay_log_file},
-    serde::{CustomSerialize, NodeMeta},
+    LOG_FILE_CHECK_TIMEOUT, LOG_FILE_DELIM,
+    log::file::{get_log_files, open_file, replay_log_file, truncate_logs},
+    serde::{CustomSerialize, NodeMeta, deserialize_entry},
     store::Types,
 };
 use std::{
     collections::HashMap,
+    io::{BufRead, BufReader, Write},
     path::Path,
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use crate::serde::{Log, LogOperation, Payload};
+use crate::serde::{Log, Payload};
 use crate::{DATA_DIR, LogWriterMsg, Op, Term};
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -25,6 +26,8 @@ use tokio::sync::mpsc;
 /// The spawned thread listens on the provided `rx` receiver for `LogWriterMsg` commands:
 /// - `LogAppend(Op::Put)` and `LogAppend(Op::Delete)`: serialize a `Log` with the current term and next index,
 ///   append it to the log file, update the atomics `LAST_LOG_INDEX` and `LAST_LOG_TERM`, and increment the next index.
+/// - `AppendEntry { .. }`: serialize a `Log` with provided term and index, append it, and update atomics.
+/// - `Truncate { last_index }`: rebuild log files up to `last_index` and update atomics.
 /// - `NodeMeta(current_term, voted_for)`: serialize and write node metadata to the meta file and update the active term.
 /// - `ShutDown`: stop the writer thread and return.
 ///
@@ -80,12 +83,8 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
             match msg {
                 LogWriterMsg::LogAppend(op) => match op {
                     Op::Delete(key) => {
-                        let log = Log::with_index(
-                            LogOperation::Delete,
-                            Payload::Delete { key: key.clone() },
-                            term,
-                            next_index,
-                        );
+                        let log =
+                            Log::with_index(Payload::Delete { key: key.clone() }, term, next_index);
                         let payload = log
                             .serialize()
                             .with_context(|| {
@@ -115,7 +114,6 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                     }
                     Op::Put(key, val) => {
                         let log = Log::with_index(
-                            LogOperation::Put,
                             Payload::Put {
                                 key: key.clone(),
                                 value: val.clone().into(),
@@ -149,6 +147,108 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         );
                     }
                 },
+                LogWriterMsg::AppendEntry {
+                    op,
+                    term: entry_term,
+                    index,
+                } => match op {
+                    Op::Delete(key) => {
+                        let log = Log::with_index(
+                            Payload::Delete { key: key.clone() },
+                            entry_term,
+                            index,
+                        );
+                        let payload = log
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Delete payload: ({})", &key)
+                            })
+                            .unwrap();
+
+                        let b = log_w
+                            .append_log(payload.as_bytes(), check_delta)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
+
+                        check_delta = false;
+
+                        LAST_LOG_INDEX.store(index, Ordering::SeqCst);
+                        LAST_LOG_TERM.store(entry_term as u32, Ordering::SeqCst);
+                        next_index = index.saturating_add(1);
+
+                        tracing::debug!(
+                            bytes = b,
+                            index = index,
+                            term = entry_term,
+                            "Wrote Delete operation to log"
+                        );
+                    }
+                    Op::Put(key, val) => {
+                        let log = Log::with_index(
+                            Payload::Put {
+                                key: key.clone(),
+                                value: val.clone().into(),
+                            },
+                            entry_term,
+                            index,
+                        );
+                        let payload = log
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
+                            })
+                            .unwrap();
+
+                        let b = log_w
+                            .append_log(payload.as_bytes(), check_delta)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
+
+                        check_delta = false;
+
+                        LAST_LOG_INDEX.store(index, Ordering::SeqCst);
+                        LAST_LOG_TERM.store(entry_term as u32, Ordering::SeqCst);
+                        next_index = index.saturating_add(1);
+
+                        tracing::debug!(
+                            bytes = b,
+                            index = index,
+                            term = entry_term,
+                            "Wrote Put operation to log"
+                        );
+                    }
+                },
+                LogWriterMsg::Truncate { last_index } => {
+                    if let Err(e) = log_w.curr_log_file.flush() {
+                        tracing::error!(error = ?e, "Failed to flush log file before truncation");
+                    }
+
+                    let (new_writer, last_term, last_idx, old_paths) =
+                        truncate_logs(&log_w.data_dir_path, last_index)
+                            .with_context(|| {
+                                format!("Failed to truncate log to index: {}", last_index)
+                            })
+                            .unwrap();
+
+                    let old_writer = std::mem::replace(&mut log_w.curr_log_file, new_writer);
+                    drop(old_writer);
+
+                    for path in old_paths {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            tracing::error!(error = ?e, file = ?path, "Failed to remove old log file");
+                        }
+                    }
+
+                    LAST_LOG_INDEX.store(last_idx, Ordering::SeqCst);
+                    LAST_LOG_TERM.store(last_term as u32, Ordering::SeqCst);
+                    next_index = last_idx.saturating_add(1);
+
+                    tracing::info!(
+                        last_index = last_idx,
+                        last_term = last_term,
+                        "Truncated log"
+                    );
+                }
                 LogWriterMsg::NodeMeta(current_term, voted_for) => {
                     let meta = NodeMeta {
                         current_term,
@@ -241,6 +341,69 @@ pub fn get_last_log_index() -> LastIdx {
 
 pub fn get_last_log_term() -> LastTerm {
     LAST_LOG_TERM.load(Ordering::SeqCst) as LastTerm
+}
+
+pub fn get_entry_term(index: u32) -> Option<Term> {
+    let files = get_log_files(Path::new(DATA_DIR)).ok()?;
+    let delim = LOG_FILE_DELIM.as_bytes()[0];
+
+    for file in files {
+        let fh = open_file(&file.file_path).ok()?;
+        let reader = BufReader::new(fh);
+
+        for record in reader.split(delim) {
+            let bytes = match record {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let log = match deserialize_entry::<Log>(&bytes) {
+                Ok(log) => log,
+                Err(_) => continue,
+            };
+
+            if log.index == index {
+                return Some(log.term);
+            }
+            if log.index > index {
+                return None;
+            }
+        }
+    }
+
+    None
+}
+
+pub fn find_first_index_of_term(term: Term) -> Option<u32> {
+    let files = get_log_files(Path::new(DATA_DIR)).ok()?;
+    let delim = LOG_FILE_DELIM.as_bytes()[0];
+
+    for file in files {
+        let fh = open_file(&file.file_path).ok()?;
+        let reader = BufReader::new(fh);
+
+        for record in reader.split(delim) {
+            let bytes = match record {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let log = match deserialize_entry::<Log>(&bytes) {
+                Ok(log) => log,
+                Err(_) => continue,
+            };
+
+            if log.term == term {
+                return Some(log.index);
+            }
+        }
+    }
+
+    None
 }
 
 /// Set the global last-log term and index used for recovery and coordination.
@@ -343,4 +506,22 @@ pub fn get_log_meta() -> (LastTerm, LastIdx) {
 
     // No indexed records found across files
     (last_term, last_idx)
+}
+
+pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogWriterMsg>) -> Result<()> {
+    if get_last_log_index() == 0 && get_entry_term(0).is_none() {
+        lw_tx
+            .send(LogWriterMsg::AppendEntry {
+                op: Op::Put(
+                    "__dee_kv_meta__".to_string(),
+                    "sentinel".to_string().into(),
+                ),
+                term: 1,
+                index: 0,
+            })
+            .await
+            .with_context(|| "Failed to append sentinel log entry")?;
+    }
+
+    Ok(())
 }

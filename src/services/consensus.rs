@@ -1,9 +1,10 @@
 use crate::{
-    ConsensusMessage, LogWriterMsg,
+    ConsensusMessage, LogWriterMsg, Op,
     cluster::CurrentNode,
     consensus_proto::{
-        AppendEntriesRequest, AppendEntriesResponse, LeaderAssertRequest, LeaderAssertResponse,
-        RequestVoteRequest, RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
+        AppendEntriesRequest, AppendEntriesResponse, Command, LeaderAssertRequest,
+        LeaderAssertResponse, RequestVoteRequest, RequestVoteResponse,
+        consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
     services::GrpcClientWrapper,
@@ -139,25 +140,158 @@ impl ConsensusSvc for ConsensusService {
 
     async fn append_entries(
         &self,
-        _request: Request<AppendEntriesRequest>,
+        request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
-        // if leader term is less than current node's
-        // reject the request with current node's term
-        // if we don't have an entry at prev_log_idx
-        // we reject the request by following either of the paths below
-        // -- to the local last log index + 1 and leave conflict term unset
-        // -- or if we have the log entry at that index but the terms don't match
-        // -- set the conflict index and conflict term to
-        // -- index and term from the entry
-        // if all above checks pass, we can safely try applying the provided entries
-        // first we truncate our log to remove all entries after prev_log_idx
-        // then if the supplied entry list is empty, it is a hearbeat
-        // so we return a success response immediately
-        // if there are entries, we append each of them to our log
-        // then set our local commit index to at most the leader commit
-        // we then add these new entries to our state machine
-        // and finally return a success response
-        todo!("append entries");
+        let req = request.into_inner();
+        let leader_term = req.term as crate::Term;
+        let leader_id = req.leader_id as u8;
+        let prev_log_idx = req.prev_log_idx;
+        let prev_log_term = req.prev_log_term;
+        let entries = req.entires;
+
+        tracing::debug!(
+            leader_id = leader_id,
+            leader_term = leader_term,
+            prev_log_idx = prev_log_idx,
+            prev_log_term = prev_log_term,
+            entry_count = entries.len(),
+            "Received append entries"
+        );
+
+        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
+
+        let mut need_persist = false;
+        let persist_term: crate::Term;
+        let persist_voted_for: Option<u8>;
+
+        {
+            let mut node = self.current_node.write().await;
+            if node.term > leader_term {
+                let cur = node.term;
+                return Ok(Response::new(AppendEntriesResponse {
+                    term: cur.into(),
+                    success: false,
+                    conflict_term: None,
+                    conflict_index: 0,
+                }));
+            }
+
+            if leader_term > node.term || !node.is_follower() {
+                node.step_down(leader_term);
+                need_persist = true;
+            }
+
+            persist_term = node.term;
+            persist_voted_for = node.voted_for.clone();
+        }
+
+        if need_persist {
+            let _ = self
+                .lw_tx
+                .send(LogWriterMsg::NodeMeta(persist_term, persist_voted_for))
+                .await;
+        }
+
+        let local_last_index = crate::log::get_last_log_index();
+        if prev_log_idx > local_last_index {
+            return Ok(Response::new(AppendEntriesResponse {
+                term: persist_term.into(),
+                success: false,
+                conflict_term: None,
+                conflict_index: local_last_index.saturating_add(1),
+            }));
+        }
+
+        if prev_log_idx > 0 {
+            match crate::log::get_entry_term(prev_log_idx) {
+                Some(local_term) if (local_term as u32) != prev_log_term => {
+                    let conflict_index =
+                        crate::log::find_first_index_of_term(local_term).unwrap_or(prev_log_idx);
+                    return Ok(Response::new(AppendEntriesResponse {
+                        term: persist_term.into(),
+                        success: false,
+                        conflict_term: Some(local_term as u32),
+                        conflict_index,
+                    }));
+                }
+                None => {
+                    return Ok(Response::new(AppendEntriesResponse {
+                        term: persist_term.into(),
+                        success: false,
+                        conflict_term: None,
+                        conflict_index: local_last_index.saturating_add(1),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        if entries.is_empty() {
+            // heartbeat
+            return Ok(Response::new(AppendEntriesResponse {
+                term: persist_term.into(),
+                success: true,
+                conflict_term: None,
+                conflict_index: 0,
+            }));
+        }
+
+        let _ = self
+            .lw_tx
+            .send(LogWriterMsg::Truncate {
+                last_index: prev_log_idx,
+            })
+            .await;
+
+        for entry in entries {
+            let command = entry.command();
+            let payload = &entry.payload;
+            let key = match payload.get("key") {
+                Some(k) => k.clone(),
+                None => {
+                    return Err(Status::invalid_argument("append_entries entry missing key"));
+                }
+            };
+
+            let op = match command {
+                Command::Put => {
+                    let value = match payload.get("value") {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Err(Status::invalid_argument(
+                                "append_entries put missing value",
+                            ));
+                        }
+                    };
+                    Op::Put(key, value.into())
+                }
+                Command::Del => Op::Delete(key),
+                Command::Unspecified => {
+                    return Err(Status::invalid_argument(
+                        "append_entries command unspecified",
+                    ));
+                }
+            };
+
+            let entry_term = entry.term as crate::Term;
+            let entry_index = entry.idx;
+
+            let _ = self
+                .lw_tx
+                .send(LogWriterMsg::AppendEntry {
+                    op,
+                    term: entry_term,
+                    index: entry_index,
+                })
+                .await;
+        }
+
+        Ok(Response::new(AppendEntriesResponse {
+            term: persist_term.into(),
+            success: true,
+            conflict_term: None,
+            conflict_index: 0,
+        }))
     }
 
     async fn leader_assert(

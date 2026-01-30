@@ -1,16 +1,10 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-use crate::{LOG_FILE_DELIM, Term};
+use crate::{Term, LOG_FILE_DELIM};
 
 pub trait CustomSerialize {
     fn serialize(&self) -> Result<String>;
-}
-
-#[derive(Serialize, Deserialize)]
-pub enum LogOperation {
-    Put,
-    Delete,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -21,7 +15,6 @@ pub enum Payload {
 
 #[derive(Serialize, Deserialize)]
 pub struct Log {
-    pub operation: LogOperation,
     pub payload: Payload,
     pub term: Term,
     pub index: u32,
@@ -36,12 +29,10 @@ impl Log {
     /// # Examples
     ///
     /// ```
-    /// use crate::{Log, LogOperation, Payload, Term};
-    ///
-    /// let op = LogOperation::Put;
+    /// use crate::{Log, Payload, Term};
     /// let payload = Payload::Put { key: "k".into(), value: "v".into() };
     /// let term: Term = 1;
-    /// let log = Log::with_index(op, payload, term, 42);
+    /// let log = Log::with_index(payload, term, 42);
     ///
     /// assert_eq!(log.term, 1);
     /// assert_eq!(log.index, 42);
@@ -50,9 +41,8 @@ impl Log {
     ///     assert_eq!(value, "v");
     /// }
     /// ```
-    pub fn with_index(operation: LogOperation, payload: Payload, term: Term, index: u32) -> Self {
+    pub fn with_index(payload: Payload, term: Term, index: u32) -> Self {
         Log {
-            operation,
             payload,
             term,
             index,

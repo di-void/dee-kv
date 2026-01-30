@@ -3,13 +3,13 @@ use std::{
     collections::HashMap,
     ffi::OsStr,
     fs::{File, Metadata, OpenOptions, create_dir_all, read_dir},
-    io::{BufRead, BufReader},
+    io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
-use crate::serde::{Log, LogOperation, Payload, deserialize_entry};
+use crate::serde::{CustomSerialize, Log, Payload, deserialize_entry};
 use crate::store::Types;
-use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, MAX_LOG_FILE_SIZE};
+use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, MAX_LOG_FILE_SIZE, Term};
 
 pub fn generate_file_name() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -108,26 +108,87 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
     let file = open_file(&file.file_path)?;
     let file = BufReader::new(file);
 
-    file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|v| {
-        let bytes = v.unwrap();
+    file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|line| {
+        let bytes = line.unwrap();
         let log = deserialize_entry::<Log>(&bytes).unwrap();
 
-        let op = log.operation;
-        match op {
-            LogOperation::Put => {
-                if let Payload::Put { key, value } = log.payload {
-                    hash.insert(key, value.into());
-                }
+        if log.index == 0 {
+            return;
+        }
+
+        match log.payload {
+            Payload::Put { key, value } => {
+                hash.insert(key, value.into());
             }
-            LogOperation::Delete => {
-                if let Payload::Delete { key } = log.payload {
-                    hash.remove(&key);
-                }
+            Payload::Delete { key } => {
+                hash.remove(&key);
             }
         }
     });
 
     Ok(())
+}
+
+pub fn truncate_logs(
+    parent_path: &Path,
+    last_index: u32,
+) -> Result<(BufWriter<File>, Term, u32, Vec<PathBuf>)> {
+    let files = get_log_files(parent_path)?;
+    let mut entries: Vec<Log> = Vec::new();
+    let mut done = false;
+    let delim = LOG_FILE_DELIM.as_bytes()[0];
+
+    for file in &files {
+        let fh = open_file(&file.file_path)?;
+        let reader = BufReader::new(fh);
+
+        for record in reader.split(delim) {
+            let bytes = record?;
+            if bytes.is_empty() {
+                continue;
+            }
+            let log = deserialize_entry::<Log>(&bytes)?;
+            if log.index <= last_index {
+                entries.push(log);
+            } else {
+                done = true;
+                break;
+            }
+        }
+
+        if done {
+            break;
+        }
+    }
+
+    let old_paths = files
+        .into_iter()
+        .map(|file| file.file_path)
+        .collect::<Vec<_>>();
+
+    let fname = generate_file_name();
+    let fh = open_or_create_file(&fname, parent_path)?;
+    let mut writer = BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), fh);
+
+    for log in &entries {
+        let payload = log
+            .serialize()
+            .with_context(|| format!("Failed to serialize log entry: {}", log.index))?;
+        writer
+            .write_all(payload.as_bytes())
+            .with_context(|| format!("Failed to write log entry: {}", log.index))?;
+    }
+
+    writer
+        .flush()
+        .with_context(|| "Failed to flush truncated log file")?;
+
+    let (last_term, last_idx) = entries
+        .last()
+        .map(|log| (log.term, log.index))
+        .unwrap_or((1, 0));
+
+    Ok((writer, last_term, last_idx, old_paths))
 }
 
 pub enum CheckStatus {
