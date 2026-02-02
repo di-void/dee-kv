@@ -32,7 +32,7 @@ message AppendEntriesRequest {
   uint32 prev_log_idx = 3;
   uint32 prev_log_term = 4;
   uint32 leader_commit = 5;
-  repeated Entry entires = 6;
+  repeated Entry entries = 6;
 }
 
 message AppendEntriesResponse {

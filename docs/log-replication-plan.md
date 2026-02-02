@@ -24,7 +24,7 @@ Goal: Use AppendEntries for periodic heartbeats.
 Steps:
 - Update src/cluster/consensus.rs:
   - Replace LeaderAssertRequest usage with AppendEntriesRequest for heartbeat rounds.
-  - Populate request fields: term, leader_id, prev_log_idx, prev_log_term, leader_commit, entires = [].
+  - Populate request fields: term, leader_id, prev_log_idx, prev_log_term, leader_commit, entries = [].
   - If any response returns a higher term, step down and persist meta.
 Acceptance:
 - Leader heartbeat loop sends AppendEntries and steps down on higher term.
@@ -78,4 +78,3 @@ Steps:
 Notes and assumptions
 - Log read APIs currently expose: get_last_log_index(), get_last_log_term(), get_entry_term(idx), find_first_index_of_term(term).
 - There is no direct log-entry range fetch helper yet; we may need to add a helper to read entries by index to build AppendEntries entries.
-- AppendEntriesRequest field name is currently "entires" in proto; we will keep it to avoid breaking generated code unless renaming is explicitly desired.

@@ -288,7 +288,7 @@ async fn run_leader_heartbeats(
                     prev_log_idx,
                     prev_log_term,
                     leader_commit: 0,
-                    entires: entries,
+                    entries,
                 });
 
                 match timeout(Duration::from_millis(300), client.append_entries(req)).await {

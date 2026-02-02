@@ -3,8 +3,7 @@ use crate::{
     cluster::CurrentNode,
     consensus_proto::{
         AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
-        RequestVoteResponse,
-        consensus_service_client::ConsensusServiceClient,
+        RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
     services::GrpcClientWrapper,
@@ -147,7 +146,7 @@ impl ConsensusSvc for ConsensusService {
         let leader_id = req.leader_id as u8;
         let prev_log_idx = req.prev_log_idx;
         let prev_log_term = req.prev_log_term;
-        let entries = req.entires;
+        let entries = req.entries;
 
         tracing::debug!(
             leader_id = leader_id,
@@ -293,7 +292,6 @@ impl ConsensusSvc for ConsensusService {
             conflict_index: 0,
         }))
     }
-
 }
 
 impl GrpcClientWrapper for ConsensusServiceClient<Channel> {
