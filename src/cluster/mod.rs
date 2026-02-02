@@ -43,6 +43,7 @@ pub struct CurrentNode {
     pub role: NodeRole,
     pub voted_for: Option<u8>,
     pub votes: u8,
+    pub commit_index: u32,
 }
 
 impl CurrentNode {
@@ -95,6 +96,7 @@ impl CurrentNode {
             role: Default::default(),
             voted_for: node_meta.voted_for,
             votes,
+            commit_index: 0,
         })
     }
     pub fn promote(&mut self) {

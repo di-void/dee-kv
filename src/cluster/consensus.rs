@@ -1,6 +1,6 @@
 use crate::{
     ConsensusMessage, LogWriterMsg,
-    cluster::{Cluster, CurrentNode, PeersTable, config::init_peers_table},
+    cluster::{Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table},
     consensus_proto::{
         AppendEntriesRequest, Command, Entry, RequestVoteRequest,
         consensus_service_client::ConsensusServiceClient,
@@ -202,6 +202,7 @@ async fn run_leader_heartbeats(
     p_table: Arc<PeersTable>,
     sd_rx: watch::Receiver<Option<()>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
+    quorum: u8,
 ) {
     let pt = Arc::clone(&p_table);
     let clients = match task::spawn_blocking(move || {
@@ -250,9 +251,9 @@ async fn run_leader_heartbeats(
         }
 
         // capture current term
-        let (curr_term, node_id) = {
+        let (curr_term, node_id, commit_index) = {
             let cw = current_node.read().await;
-            (cw.term, cw.id)
+            (cw.term, cw.id, cw.commit_index)
         };
 
         tracing::debug!(
@@ -287,7 +288,7 @@ async fn run_leader_heartbeats(
                     leader_id: leader_id.into(),
                     prev_log_idx,
                     prev_log_term,
-                    leader_commit: 0,
+                    leader_commit: commit_index,
                     entries,
                 });
 
@@ -366,6 +367,15 @@ async fn run_leader_heartbeats(
             break; // exit heartbeat loop to re-enter election cycle
         }
 
+        update_commit_index(
+            &current_node,
+            &clients,
+            quorum,
+            curr_term,
+            commit_index,
+        )
+        .await;
+
         // sleep until next heartbeat round
         tokio::time::sleep(std::time::Duration::from_millis(
             crate::cluster::LEADER_HEARTBEAT_INTERVAL_MS as u64,
@@ -400,6 +410,43 @@ fn build_append_entries(entries: Vec<crate::serde::Log>) -> Vec<Entry> {
             }
         })
         .collect()
+}
+
+async fn update_commit_index(
+    current_node: &Arc<RwLock<CurrentNode>>,
+    clients: &Vec<(ConsensusServiceClient<Channel>, Arc<tokio::sync::Mutex<Peer>>)>,
+    quorum: u8,
+    curr_term: crate::Term,
+    commit_index: u32,
+) {
+    let mut match_indexes = Vec::with_capacity(clients.len() + 1);
+    match_indexes.push(crate::log::get_last_log_index());
+
+    for (_, peer) in clients {
+        let guard = peer.lock().await;
+        match_indexes.push(guard.match_index);
+    }
+
+    match_indexes.sort_unstable();
+    let quorum_index = match_indexes.len().saturating_sub(quorum as usize);
+    if quorum_index >= match_indexes.len() {
+        return;
+    }
+
+    let candidate_index = match_indexes[quorum_index];
+    if candidate_index <= commit_index {
+        return;
+    }
+
+    let candidate_term = crate::log::get_entry_term(candidate_index);
+    if candidate_term != Some(curr_term) {
+        return;
+    }
+
+    let mut node = current_node.write().await;
+    if candidate_index > node.commit_index {
+        node.commit_index = candidate_index;
+    }
 }
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
@@ -455,6 +502,7 @@ pub async fn begin(
                         Arc::clone(&p_table),
                         sd_rx.clone(),
                         lw_tx.clone(),
+                        quorom,
                     )
                     .await;
                 }

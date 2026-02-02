@@ -146,6 +146,7 @@ impl ConsensusSvc for ConsensusService {
         let leader_id = req.leader_id as u8;
         let prev_log_idx = req.prev_log_idx;
         let prev_log_term = req.prev_log_term;
+        let leader_commit = req.leader_commit;
         let entries = req.entries;
 
         tracing::debug!(
@@ -227,6 +228,15 @@ impl ConsensusSvc for ConsensusService {
 
         if entries.is_empty() {
             // heartbeat
+            if leader_commit > 0 {
+                let local_last_index = crate::log::get_last_log_index();
+                let commit_index = leader_commit.min(local_last_index);
+                let mut node = self.current_node.write().await;
+                if commit_index > node.commit_index {
+                    node.commit_index = commit_index;
+                }
+            }
+
             return Ok(Response::new(AppendEntriesResponse {
                 term: persist_term.into(),
                 success: true,
@@ -234,6 +244,8 @@ impl ConsensusSvc for ConsensusService {
                 conflict_index: 0,
             }));
         }
+
+        let entries_len = entries.len() as u32;
 
         let _ = self
             .lw_tx
@@ -283,6 +295,15 @@ impl ConsensusSvc for ConsensusService {
                     index: entry_index,
                 })
                 .await;
+        }
+
+        if leader_commit > 0 {
+            let new_last_index = prev_log_idx.saturating_add(entries_len);
+            let commit_index = leader_commit.min(new_last_index);
+            let mut node = self.current_node.write().await;
+            if commit_index > node.commit_index {
+                node.commit_index = commit_index;
+            }
         }
 
         Ok(Response::new(AppendEntriesResponse {
