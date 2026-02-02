@@ -1,6 +1,7 @@
 pub mod config;
 pub mod consensus;
 pub mod hearbeats;
+pub mod consensus_apply;
 
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -44,6 +45,7 @@ pub struct CurrentNode {
     pub voted_for: Option<u8>,
     pub votes: u8,
     pub commit_index: u32,
+    pub last_applied_idx: u32,
 }
 
 impl CurrentNode {
@@ -97,6 +99,7 @@ impl CurrentNode {
             voted_for: node_meta.voted_for,
             votes,
             commit_index: 0,
+            last_applied_idx: 0,
         })
     }
     pub fn promote(&mut self) {

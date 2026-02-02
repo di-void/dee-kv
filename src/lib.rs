@@ -3,7 +3,7 @@ pub mod log;
 mod serde;
 pub mod server;
 pub mod services;
-mod store;
+pub mod store;
 pub mod utils;
 
 #[derive(Debug)]

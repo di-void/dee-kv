@@ -74,7 +74,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
         let timeout = Duration::from_millis(LOG_FILE_CHECK_TIMEOUT as u64);
 
         loop {
-            let msg = rx.blocking_recv().unwrap(); // DANGER
+            let msg = rx.blocking_recv().unwrap(); // TODO: handle error
             if now.elapsed() >= timeout {
                 now = Instant::now();
                 check_delta = true;
@@ -559,10 +559,7 @@ pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogWriterMsg>) -> Result
     if get_last_log_index() == 0 && get_entry_term(0).is_none() {
         lw_tx
             .send(LogWriterMsg::AppendEntry {
-                op: Op::Put(
-                    "__dee_kv_meta__".to_string(),
-                    "sentinel".to_string().into(),
-                ),
+                op: Op::Put("__dee_kv_meta__".to_string(), "sentinel".to_string().into()),
                 term: 1,
                 index: 0,
             })

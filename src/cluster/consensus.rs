@@ -1,6 +1,6 @@
 use crate::{
     ConsensusMessage, LogWriterMsg,
-    cluster::{Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table},
+    cluster::{Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table, consensus_apply::ApplyMsg},
     consensus_proto::{
         AppendEntriesRequest, Command, Entry, RequestVoteRequest,
         consensus_service_client::ConsensusServiceClient,
@@ -199,6 +199,7 @@ pub async fn start_election(
 #[tracing::instrument(skip_all)]
 async fn run_leader_heartbeats(
     current_node: Arc<RwLock<CurrentNode>>,
+    apply_tx: mpsc::Sender<ApplyMsg>,
     p_table: Arc<PeersTable>,
     sd_rx: watch::Receiver<Option<()>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
@@ -367,14 +368,9 @@ async fn run_leader_heartbeats(
             break; // exit heartbeat loop to re-enter election cycle
         }
 
-        update_commit_index(
-            &current_node,
-            &clients,
-            quorum,
-            curr_term,
-            commit_index,
-        )
-        .await;
+        update_commit_index(&current_node, &clients, quorum, curr_term, commit_index).await;
+
+        let _ = apply_tx.send(ApplyMsg::Apply).await;
 
         // sleep until next heartbeat round
         tokio::time::sleep(std::time::Duration::from_millis(
@@ -414,7 +410,10 @@ fn build_append_entries(entries: Vec<crate::serde::Log>) -> Vec<Entry> {
 
 async fn update_commit_index(
     current_node: &Arc<RwLock<CurrentNode>>,
-    clients: &Vec<(ConsensusServiceClient<Channel>, Arc<tokio::sync::Mutex<Peer>>)>,
+    clients: &Vec<(
+        ConsensusServiceClient<Channel>,
+        Arc<tokio::sync::Mutex<Peer>>,
+    )>,
     quorum: u8,
     curr_term: crate::Term,
     commit_index: u32,
@@ -445,14 +444,21 @@ async fn update_commit_index(
 
     let mut node = current_node.write().await;
     if candidate_index > node.commit_index {
+        tracing::debug!(
+            prev_commit_index = node.commit_index,
+            new_commit_index = candidate_index,
+            "Leader advanced commit index"
+        );
         node.commit_index = candidate_index;
     }
 }
+
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
 pub async fn begin(
     cc: &Cluster,
     current_node: Arc<RwLock<CurrentNode>>,
+    apply_tx: mpsc::Sender<ApplyMsg>,
     tx_rx: (
         mpsc::Sender<LogWriterMsg>,  // log-writer
         watch::Receiver<Option<()>>, // shutdown
@@ -499,6 +505,7 @@ pub async fn begin(
                 Ok(_) => {
                     run_leader_heartbeats(
                         Arc::clone(&current_node),
+                        apply_tx.clone(),
                         Arc::clone(&p_table),
                         sd_rx.clone(),
                         lw_tx.clone(),

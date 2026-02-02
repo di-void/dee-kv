@@ -1,6 +1,7 @@
 use crate::{
     ConsensusMessage, LogWriterMsg, Op,
     cluster::CurrentNode,
+    cluster::consensus_apply::ApplyMsg,
     consensus_proto::{
         AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
         RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
@@ -18,6 +19,7 @@ pub struct ConsensusService {
     current_node: Arc<RwLock<CurrentNode>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
     csus_tx: watch::Sender<ConsensusMessage>,
+    apply_tx: mpsc::Sender<ApplyMsg>,
 }
 
 impl ConsensusService {
@@ -25,11 +27,13 @@ impl ConsensusService {
         current_node: Arc<RwLock<CurrentNode>>,
         lw_tx: mpsc::Sender<LogWriterMsg>,
         csus_tx: watch::Sender<ConsensusMessage>,
+        apply_tx: mpsc::Sender<ApplyMsg>,
     ) -> Self {
         Self {
             current_node,
             lw_tx,
             csus_tx,
+            apply_tx,
         }
     }
 }
@@ -237,6 +241,8 @@ impl ConsensusSvc for ConsensusService {
                 }
             }
 
+            let _ = self.apply_tx.send(ApplyMsg::Apply).await; // apply committed entries
+
             return Ok(Response::new(AppendEntriesResponse {
                 term: persist_term.into(),
                 success: true,
@@ -305,6 +311,8 @@ impl ConsensusSvc for ConsensusService {
                 node.commit_index = commit_index;
             }
         }
+
+        let _ = self.apply_tx.send(ApplyMsg::Apply).await;
 
         Ok(Response::new(AppendEntriesResponse {
             term: persist_term.into(),
