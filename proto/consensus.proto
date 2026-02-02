@@ -2,14 +2,6 @@ syntax = "proto3";
 
 package consensus;
 
-message LeaderAssertRequest {
-  uint32 term = 1;
-}
-message LeaderAssertResponse {
-  uint32 term = 1;
-  bool success = 2;
-}
-
 message RequestVoteRequest {
   uint32 term = 1;
   uint32 candidate_id = 2;
@@ -52,7 +44,6 @@ message AppendEntriesResponse {
 
 // raft
 service ConsensusService {
-  rpc LeaderAssert(LeaderAssertRequest) returns (LeaderAssertResponse);
   rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
   rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
 }

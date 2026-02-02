@@ -183,6 +183,8 @@ pub struct Peer {
     pub status: PeerStatus,
     pub last_ping: std::time::Instant,
     pub channel: Channel,
+    pub next_index: u32,
+    pub match_index: u32,
 }
 
 pub type PeersTable = Vec<Arc<Mutex<Peer>>>;

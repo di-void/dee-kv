@@ -2,8 +2,8 @@ use crate::{
     ConsensusMessage, LogWriterMsg, Op,
     cluster::CurrentNode,
     consensus_proto::{
-        AppendEntriesRequest, AppendEntriesResponse, Command, LeaderAssertRequest,
-        LeaderAssertResponse, RequestVoteRequest, RequestVoteResponse,
+        AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
+        RequestVoteResponse,
         consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
@@ -294,58 +294,6 @@ impl ConsensusSvc for ConsensusService {
         }))
     }
 
-    async fn leader_assert(
-        &self,
-        request: Request<LeaderAssertRequest>,
-    ) -> Result<Response<LeaderAssertResponse>, Status> {
-        let req = request.into_inner();
-        let leader_term = req.term as crate::Term;
-
-        tracing::debug!(leader_term = leader_term, "Received leader heartbeat");
-
-        // Reset election timer immediately to avoid unnecessary elections.
-        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
-
-        let mut need_persist = false;
-        let persist_term: crate::Term;
-        let persist_voted_for: Option<u8>;
-
-        {
-            let mut node = self.current_node.write().await;
-            if node.term > leader_term {
-                let cur = node.term;
-                drop(node);
-                return Ok(Response::new(LeaderAssertResponse {
-                    term: cur.into(),
-                    success: false,
-                }));
-            }
-
-            // If leader's term is greater or equal, step down to follower.
-            if leader_term >= node.term && !node.is_follower() {
-                node.step_down(leader_term);
-                need_persist = true;
-            }
-
-            persist_term = node.term;
-            persist_voted_for = node.voted_for.clone();
-        }
-
-        if need_persist {
-            let _ = self
-                .lw_tx
-                .send(LogWriterMsg::NodeMeta(persist_term, persist_voted_for))
-                .await;
-        }
-
-        // reset timer again for good measure.
-        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
-
-        Ok(Response::new(LeaderAssertResponse {
-            term: persist_term.into(),
-            success: true,
-        }))
-    }
 }
 
 impl GrpcClientWrapper for ConsensusServiceClient<Channel> {

@@ -2,8 +2,10 @@ use crate::{
     ConsensusMessage, LogWriterMsg,
     cluster::{Cluster, CurrentNode, PeersTable, config::init_peers_table},
     consensus_proto::{
-        LeaderAssertRequest, RequestVoteRequest, consensus_service_client::ConsensusServiceClient,
+        AppendEntriesRequest, Command, Entry, RequestVoteRequest,
+        consensus_service_client::ConsensusServiceClient,
     },
+    serde::Payload,
     services::create_custom_clients,
 };
 use anyhow::{Context, Result, anyhow};
@@ -18,12 +20,14 @@ use tokio::{
 };
 use tonic::{Request, transport::Channel};
 
+const MAX_APPEND_ENTRIES: usize = 64;
+
 /// Runs the continuous election loop for the local node and attempts to acquire leadership.
 ///
 /// When an election timeout elapses, a follower is promoted to candidate (votes for itself),
 /// the node's metadata is persisted via the provided log-writer, and RequestVote RPCs are
 /// dispatched concurrently to all peers. Incoming consensus messages observed on `csus_rx`
-/// that are `LeaderAssert` or `VoteGranted` reset the election timer. If the collected votes
+/// that are `ResetTimer` reset the election timer. If the collected votes
 /// reach `quorom`, the node is promoted to leader.
 ///
 /// # Parameters
@@ -225,6 +229,13 @@ async fn run_leader_heartbeats(
     };
 
     // heartbeat loop
+    let leader_last_index = crate::log::get_last_log_index();
+    for (_, peer) in &clients {
+        let mut guard = peer.lock().await;
+        guard.next_index = leader_last_index.saturating_add(1);
+        guard.match_index = 0;
+    }
+
     loop {
         // shutdown check
         if sd_rx.borrow().is_some() {
@@ -252,20 +263,67 @@ async fn run_leader_heartbeats(
 
         let mut futs = FuturesUnordered::new();
 
-        for (client, _) in &clients {
+        for (client, peer) in &clients {
             let mut client = client.clone();
             let term = curr_term;
+            let leader_id = node_id;
+            let peer = Arc::clone(peer);
 
             futs.push(tokio::spawn(async move {
-                let req = Request::new(LeaderAssertRequest { term: term.into() });
+                let next_index = {
+                    let guard = peer.lock().await;
+                    guard.next_index
+                };
+                let prev_log_idx = next_index.saturating_sub(1);
+                let prev_log_term = crate::log::get_entry_term(prev_log_idx)
+                    .map(|t| t as u32)
+                    .unwrap_or(0);
+                let entries = crate::log::get_entries_from(next_index, MAX_APPEND_ENTRIES);
+                let last_entry_index = entries.last().map(|entry| entry.index);
+                let entries = build_append_entries(entries);
 
-                match timeout(Duration::from_millis(300), client.leader_assert(req)).await {
+                let req = Request::new(AppendEntriesRequest {
+                    term: term.into(),
+                    leader_id: leader_id.into(),
+                    prev_log_idx,
+                    prev_log_term,
+                    leader_commit: 0,
+                    entires: entries,
+                });
+
+                match timeout(Duration::from_millis(300), client.append_entries(req)).await {
                     Ok(Ok(res)) => {
                         let resp = res.into_inner();
+                        if resp.term > term.into() {
+                            return Err(Some(resp.term));
+                        }
+
                         if resp.success {
+                            let mut guard = peer.lock().await;
+                            if let Some(last_index) = last_entry_index {
+                                guard.match_index = last_index;
+                                guard.next_index = last_index.saturating_add(1);
+                            } else {
+                                if prev_log_idx > guard.match_index {
+                                    guard.match_index = prev_log_idx;
+                                }
+                                if guard.next_index < prev_log_idx.saturating_add(1) {
+                                    guard.next_index = prev_log_idx.saturating_add(1);
+                                }
+                            }
                             Ok(())
                         } else {
-                            Err(Some(resp.term))
+                            let mut guard = peer.lock().await;
+                            let next_index = match resp.conflict_term {
+                                Some(conflict_term) => crate::log::find_first_index_of_term(
+                                    conflict_term as crate::Term,
+                                )
+                                .unwrap_or(resp.conflict_index),
+                                None => resp.conflict_index,
+                            }
+                            .max(1);
+                            guard.next_index = next_index;
+                            Err(None)
                         }
                     }
                     Ok(Err(_status)) => Err(None),
@@ -314,6 +372,34 @@ async fn run_leader_heartbeats(
         ))
         .await;
     }
+}
+
+fn build_append_entries(entries: Vec<crate::serde::Log>) -> Vec<Entry> {
+    entries
+        .into_iter()
+        .map(|entry| {
+            let (command, payload) = match entry.payload {
+                Payload::Put { key, value } => {
+                    let mut payload = std::collections::HashMap::new();
+                    payload.insert("key".to_string(), key);
+                    payload.insert("value".to_string(), value);
+                    (Command::Put, payload)
+                }
+                Payload::Delete { key } => {
+                    let mut payload = std::collections::HashMap::new();
+                    payload.insert("key".to_string(), key);
+                    (Command::Del, payload)
+                }
+            };
+
+            Entry {
+                idx: entry.index,
+                term: entry.term as u32,
+                command: command as i32,
+                payload,
+            }
+        })
+        .collect()
 }
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]

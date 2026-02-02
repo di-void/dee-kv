@@ -406,6 +406,53 @@ pub fn find_first_index_of_term(term: Term) -> Option<u32> {
     None
 }
 
+pub fn get_entries_from(start_index: u32, max_entries: usize) -> Vec<Log> {
+    if max_entries == 0 {
+        return Vec::new();
+    }
+
+    let files = match get_log_files(Path::new(DATA_DIR)) {
+        Ok(files) => files,
+        Err(_) => return Vec::new(),
+    };
+
+    let delim = LOG_FILE_DELIM.as_bytes()[0];
+    let mut entries = Vec::new();
+
+    for file in files {
+        let fh = match open_file(&file.file_path) {
+            Ok(fh) => fh,
+            Err(_) => continue,
+        };
+        let reader = BufReader::new(fh);
+
+        for record in reader.split(delim) {
+            let bytes = match record {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let log = match deserialize_entry::<Log>(&bytes) {
+                Ok(log) => log,
+                Err(_) => continue,
+            };
+
+            if log.index == 0 || log.index < start_index {
+                continue;
+            }
+
+            entries.push(log);
+            if entries.len() >= max_entries {
+                return entries;
+            }
+        }
+    }
+
+    entries
+}
+
 /// Set the global last-log term and index used for recovery and coordination.
 ///
 /// This updates the module-level atomic metadata that other threads read to determine
