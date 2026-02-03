@@ -74,7 +74,11 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
         let timeout = Duration::from_millis(LOG_FILE_CHECK_TIMEOUT as u64);
 
         loop {
-            let msg = rx.blocking_recv().unwrap(); // TODO: handle error
+            let msg = match rx.blocking_recv() {
+                Some(msg) => msg,
+                _ => break,
+            };
+
             if now.elapsed() >= timeout {
                 now = Instant::now();
                 check_delta = true;

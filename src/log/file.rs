@@ -109,8 +109,19 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
     let file = BufReader::new(file);
 
     file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|line| {
-        let bytes = line.unwrap();
-        let log = deserialize_entry::<Log>(&bytes).unwrap();
+        let bytes = match line {
+            Ok(bytes) => bytes,
+            _ => return,
+        };
+
+        if bytes.is_empty() {
+            return;
+        }
+
+        let log = match deserialize_entry::<Log>(&bytes) {
+            Ok(log) => log,
+            _ => return,
+        };
 
         if log.index == 0 {
             return;

@@ -241,7 +241,11 @@ impl ConsensusSvc for ConsensusService {
                 }
             }
 
-            let _ = self.apply_tx.send(ApplyMsg::Apply).await; // apply committed entries
+            if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+                // apply committed entries
+                tracing::error!(error = ?err, "Apply channel closed");
+                return Err(Status::internal("apply worker unavailable"));
+            };
 
             return Ok(Response::new(AppendEntriesResponse {
                 term: persist_term.into(),
@@ -253,12 +257,16 @@ impl ConsensusSvc for ConsensusService {
 
         let entries_len = entries.len() as u32;
 
-        let _ = self
+        if let Err(err) = self
             .lw_tx
             .send(LogWriterMsg::Truncate {
                 last_index: prev_log_idx,
             })
-            .await;
+            .await
+        {
+            tracing::error!(error = ?err, "Log writer unavailable");
+            return Err(Status::internal("log writer unavailable"));
+        };
 
         for entry in entries {
             let command = entry.command();
@@ -293,14 +301,18 @@ impl ConsensusSvc for ConsensusService {
             let entry_term = entry.term as crate::Term;
             let entry_index = entry.idx;
 
-            let _ = self
+            if let Err(err) = self
                 .lw_tx
                 .send(LogWriterMsg::AppendEntry {
                     op,
                     term: entry_term,
                     index: entry_index,
                 })
-                .await;
+                .await
+            {
+                tracing::error!(error = ?err, "Log writer unavailable");
+                return Err(Status::internal("log writer unavailable"));
+            };
         }
 
         if leader_commit > 0 {
@@ -312,7 +324,11 @@ impl ConsensusSvc for ConsensusService {
             }
         }
 
-        let _ = self.apply_tx.send(ApplyMsg::Apply).await;
+        if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+            // apply committed entries
+            tracing::error!(error = ?err, "Apply channel closed");
+            return Err(Status::internal("apply worker unavailable"));
+        };
 
         Ok(Response::new(AppendEntriesResponse {
             term: persist_term.into(),
