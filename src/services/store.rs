@@ -8,16 +8,17 @@ use crate::{
 };
 use tokio::sync::{RwLock, mpsc::Sender};
 use tonic::{Request, Response, Status};
+use std::sync::Arc;
 
 pub struct StoreService {
-    kv: RwLock<KV>,
+    kv: Arc<RwLock<KV>>,
     log_writer: Sender<LogWriterMsg>,
 }
 
 impl StoreService {
-    pub fn with_log_writer(tx: Sender<LogWriterMsg>) -> Self {
+    pub fn with_log_writer(store: Arc<RwLock<KV>>, tx: Sender<LogWriterMsg>) -> Self {
         Self {
-            kv: Default::default(),
+            kv: store,
             log_writer: tx,
         }
     }
@@ -46,7 +47,6 @@ impl StoreSvc for StoreService {
         let msg = request.into_inner();
         let kv = (msg.key, msg.value);
 
-        let mut w = self.kv.write().await;
         self.log_writer
             .send(LogWriterMsg::LogAppend(Op::Put(
                 kv.0.clone(),
@@ -54,8 +54,6 @@ impl StoreSvc for StoreService {
             )))
             .await
             .unwrap();
-
-        w.set((&kv.0, kv.1.clone().into()));
 
         Ok(Response::new(PutResponse {
             key: kv.0,
@@ -70,10 +68,11 @@ impl StoreSvc for StoreService {
         let msg = request.into_inner();
         let key = msg.key;
 
-        let mut w = self.kv.write().await;
-        match w.delete(&key) {
+        let r = self.kv.read().await;
+        let value = r.get(&key);
+        match value {
             Some(v) => {
-                let value: String = v.into(); // we only have string types now
+                let value: String = v.into();
                 self.log_writer
                     .send(LogWriterMsg::LogAppend(Op::Delete(key.clone())))
                     .await

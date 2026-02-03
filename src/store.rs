@@ -1,4 +1,4 @@
-use crate::{DATA_DIR, log::load_store};
+use crate::{log::load_store, serde::Log, serde::Payload, DATA_DIR};
 use anyhow::Context;
 use std::collections::HashMap;
 use std::path::Path;
@@ -33,6 +33,17 @@ impl Store {
 
     pub fn delete(&mut self, k: &str) -> Option<Types> {
         self._store.remove(k)
+    }
+
+    pub fn apply_log(&mut self, log: &Log) {
+        match &log.payload {
+            Payload::Put { key, value } => {
+                self.set((key, value.clone().into()));
+            }
+            Payload::Delete { key } => {
+                let _ = self.delete(key);
+            }
+        }
     }
 }
 

@@ -3,7 +3,7 @@ pub mod log;
 mod serde;
 pub mod server;
 pub mod services;
-mod store;
+pub mod store;
 pub mod utils;
 
 #[derive(Debug)]
@@ -14,6 +14,8 @@ pub enum Op {
 
 pub enum LogWriterMsg {
     LogAppend(Op),
+    AppendEntry { op: Op, term: Term, index: u32 },
+    Truncate { last_index: u32 },
     NodeMeta(Term, Option<u8>), // (currentTerm, votedFor)
     ShutDown,
 }

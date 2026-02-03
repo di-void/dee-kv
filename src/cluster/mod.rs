@@ -1,6 +1,7 @@
 pub mod config;
 pub mod consensus;
 pub mod hearbeats;
+pub mod consensus_apply;
 
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -43,6 +44,8 @@ pub struct CurrentNode {
     pub role: NodeRole,
     pub voted_for: Option<u8>,
     pub votes: u8,
+    pub commit_index: u32,
+    pub last_applied_idx: u32,
 }
 
 impl CurrentNode {
@@ -95,6 +98,8 @@ impl CurrentNode {
             role: Default::default(),
             voted_for: node_meta.voted_for,
             votes,
+            commit_index: 0,
+            last_applied_idx: 0,
         })
     }
     pub fn promote(&mut self) {
@@ -183,6 +188,8 @@ pub struct Peer {
     pub status: PeerStatus,
     pub last_ping: std::time::Instant,
     pub channel: Channel,
+    pub next_index: u32,
+    pub match_index: u32,
 }
 
 pub type PeersTable = Vec<Arc<Mutex<Peer>>>;

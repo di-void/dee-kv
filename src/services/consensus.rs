@@ -1,9 +1,10 @@
 use crate::{
-    ConsensusMessage, LogWriterMsg,
+    ConsensusMessage, LogWriterMsg, Op,
     cluster::CurrentNode,
+    cluster::consensus_apply::ApplyMsg,
     consensus_proto::{
-        AppendEntriesRequest, AppendEntriesResponse, LeaderAssertRequest, LeaderAssertResponse,
-        RequestVoteRequest, RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
+        AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
+        RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
     services::GrpcClientWrapper,
@@ -18,6 +19,7 @@ pub struct ConsensusService {
     current_node: Arc<RwLock<CurrentNode>>,
     lw_tx: mpsc::Sender<LogWriterMsg>,
     csus_tx: watch::Sender<ConsensusMessage>,
+    apply_tx: mpsc::Sender<ApplyMsg>,
 }
 
 impl ConsensusService {
@@ -25,11 +27,13 @@ impl ConsensusService {
         current_node: Arc<RwLock<CurrentNode>>,
         lw_tx: mpsc::Sender<LogWriterMsg>,
         csus_tx: watch::Sender<ConsensusMessage>,
+        apply_tx: mpsc::Sender<ApplyMsg>,
     ) -> Self {
         Self {
             current_node,
             lw_tx,
             csus_tx,
+            apply_tx,
         }
     }
 }
@@ -139,21 +143,25 @@ impl ConsensusSvc for ConsensusService {
 
     async fn append_entries(
         &self,
-        _request: Request<AppendEntriesRequest>,
+        request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
-        todo!("append entries");
-    }
-
-    async fn leader_assert(
-        &self,
-        request: Request<LeaderAssertRequest>,
-    ) -> Result<Response<LeaderAssertResponse>, Status> {
         let req = request.into_inner();
         let leader_term = req.term as crate::Term;
+        let leader_id = req.leader_id as u8;
+        let prev_log_idx = req.prev_log_idx;
+        let prev_log_term = req.prev_log_term;
+        let leader_commit = req.leader_commit;
+        let entries = req.entries;
 
-        tracing::debug!(leader_term = leader_term, "Received leader heartbeat");
+        tracing::debug!(
+            leader_id = leader_id,
+            leader_term = leader_term,
+            prev_log_idx = prev_log_idx,
+            prev_log_term = prev_log_term,
+            entry_count = entries.len(),
+            "Received append entries"
+        );
 
-        // Reset election timer immediately to avoid unnecessary elections.
         let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
 
         let mut need_persist = false;
@@ -164,15 +172,15 @@ impl ConsensusSvc for ConsensusService {
             let mut node = self.current_node.write().await;
             if node.term > leader_term {
                 let cur = node.term;
-                drop(node);
-                return Ok(Response::new(LeaderAssertResponse {
+                return Ok(Response::new(AppendEntriesResponse {
                     term: cur.into(),
                     success: false,
+                    conflict_term: None,
+                    conflict_index: 0,
                 }));
             }
 
-            // If leader's term is greater or equal, step down to follower.
-            if leader_term >= node.term && !node.is_follower() {
+            if leader_term > node.term || !node.is_follower() {
                 node.step_down(leader_term);
                 need_persist = true;
             }
@@ -188,12 +196,145 @@ impl ConsensusSvc for ConsensusService {
                 .await;
         }
 
-        // reset timer again for good measure.
-        let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
+        let local_last_index = crate::log::get_last_log_index();
+        if prev_log_idx > local_last_index {
+            return Ok(Response::new(AppendEntriesResponse {
+                term: persist_term.into(),
+                success: false,
+                conflict_term: None,
+                conflict_index: local_last_index.saturating_add(1),
+            }));
+        }
 
-        Ok(Response::new(LeaderAssertResponse {
+        if prev_log_idx > 0 {
+            match crate::log::get_entry_term(prev_log_idx) {
+                Some(local_term) if (local_term as u32) != prev_log_term => {
+                    let conflict_index =
+                        crate::log::find_first_index_of_term(local_term).unwrap_or(prev_log_idx);
+                    return Ok(Response::new(AppendEntriesResponse {
+                        term: persist_term.into(),
+                        success: false,
+                        conflict_term: Some(local_term as u32),
+                        conflict_index,
+                    }));
+                }
+                None => {
+                    return Ok(Response::new(AppendEntriesResponse {
+                        term: persist_term.into(),
+                        success: false,
+                        conflict_term: None,
+                        conflict_index: local_last_index.saturating_add(1),
+                    }));
+                }
+                _ => {}
+            }
+        }
+
+        if entries.is_empty() {
+            // heartbeat
+            if leader_commit > 0 {
+                let local_last_index = crate::log::get_last_log_index();
+                let commit_index = leader_commit.min(local_last_index);
+                let mut node = self.current_node.write().await;
+                if commit_index > node.commit_index {
+                    node.commit_index = commit_index;
+                }
+            }
+
+            if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+                // apply committed entries
+                tracing::error!(error = ?err, "Apply channel closed");
+                return Err(Status::internal("apply worker unavailable"));
+            };
+
+            return Ok(Response::new(AppendEntriesResponse {
+                term: persist_term.into(),
+                success: true,
+                conflict_term: None,
+                conflict_index: 0,
+            }));
+        }
+
+        let entries_len = entries.len() as u32;
+
+        if let Err(err) = self
+            .lw_tx
+            .send(LogWriterMsg::Truncate {
+                last_index: prev_log_idx,
+            })
+            .await
+        {
+            tracing::error!(error = ?err, "Log writer unavailable");
+            return Err(Status::internal("log writer unavailable"));
+        };
+
+        for entry in entries {
+            let command = entry.command();
+            let payload = &entry.payload;
+            let key = match payload.get("key") {
+                Some(k) => k.clone(),
+                None => {
+                    return Err(Status::invalid_argument("append_entries entry missing key"));
+                }
+            };
+
+            let op = match command {
+                Command::Put => {
+                    let value = match payload.get("value") {
+                        Some(v) => v.clone(),
+                        None => {
+                            return Err(Status::invalid_argument(
+                                "append_entries put missing value",
+                            ));
+                        }
+                    };
+                    Op::Put(key, value.into())
+                }
+                Command::Del => Op::Delete(key),
+                Command::Unspecified => {
+                    return Err(Status::invalid_argument(
+                        "append_entries command unspecified",
+                    ));
+                }
+            };
+
+            let entry_term = entry.term as crate::Term;
+            let entry_index = entry.idx;
+
+            if let Err(err) = self
+                .lw_tx
+                .send(LogWriterMsg::AppendEntry {
+                    op,
+                    term: entry_term,
+                    index: entry_index,
+                })
+                .await
+            {
+                tracing::error!(error = ?err, "Log writer unavailable");
+                return Err(Status::internal("log writer unavailable"));
+            };
+        }
+
+        if leader_commit > 0 {
+            let new_last_index = prev_log_idx.saturating_add(entries_len);
+            let commit_index = leader_commit.min(new_last_index);
+            let mut node = self.current_node.write().await;
+            if commit_index > node.commit_index {
+                node.commit_index = commit_index;
+            }
+        }
+
+        if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+            // apply committed entries
+            tracing::error!(error = ?err, "Apply channel closed");
+            return Err(Status::internal("apply worker unavailable"));
+        };
+
+        Ok(Response::new(AppendEntriesResponse {
             term: persist_term.into(),
             success: true,
+            conflict_term: None,
+            conflict_index: 0,
         }))
     }
 }

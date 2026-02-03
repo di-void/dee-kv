@@ -2,14 +2,6 @@ syntax = "proto3";
 
 package consensus;
 
-message LeaderAssertRequest {
-  uint32 term = 1;
-}
-message LeaderAssertResponse {
-  uint32 term = 1;
-  bool success = 2;
-}
-
 message RequestVoteRequest {
   uint32 term = 1;
   uint32 candidate_id = 2;
@@ -21,16 +13,37 @@ message RequestVoteResponse {
   bool vote_granted = 2;
 }
 
+enum Command {
+  COMMAND_UNSPECIFIED = 0;
+  COMMAND_PUT = 1;
+  COMMAND_DEL = 2;
+}
+
+message Entry {
+  uint32 idx = 1;
+  uint32 term = 2;
+  Command command = 3;
+  map<string, string> payload = 4; //
+}
+
 message AppendEntriesRequest {
   uint32 term = 1;
+  uint32 leader_id = 2;
+  uint32 prev_log_idx = 3;
+  uint32 prev_log_term = 4;
+  uint32 leader_commit = 5;
+  repeated Entry entries = 6;
 }
+
 message AppendEntriesResponse {
   uint32 term = 1;
+  bool success = 2;
+  optional uint32 conflict_term = 3;
+  uint32 conflict_index = 4;
 }
 
 // raft
 service ConsensusService {
-  rpc LeaderAssert(LeaderAssertRequest) returns (LeaderAssertResponse);
   rpc RequestVote(RequestVoteRequest) returns (RequestVoteResponse);
   rpc AppendEntries(AppendEntriesRequest) returns (AppendEntriesResponse);
 }

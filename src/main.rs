@@ -1,7 +1,8 @@
 use dee_kv::{
     ConsensusMessage, LogWriterMsg,
     cluster::{self, CurrentNode, consensus},
-    log, server,
+    cluster::consensus_apply::{ApplyMsg, run_apply_worker},
+    log, server, store::Store,
     utils::env,
 };
 use tokio::{
@@ -35,6 +36,7 @@ fn main() -> anyhow::Result<()> {
 
         let rt = rt_handle.clone();
         let (lw_tx, lw_rx) = mpsc::channel::<LogWriterMsg>(5);
+        let (apply_tx, apply_rx) = mpsc::channel::<ApplyMsg>(8);
         let (shd_tx, shd_rx) = watch::channel::<Option<()>>(None);
         let (csus_tx, csus_rx) = watch::channel(ConsensusMessage::Init);
         // initialize atomic last-log meta from on-disk logs before starting writer/server
@@ -42,6 +44,18 @@ fn main() -> anyhow::Result<()> {
         log::init_last_log_meta(disk_term, disk_last_idx);
         let lw_handle = log::init_log_writer(current_node.term, lw_rx);
         let current_node = Arc::new(RwLock::new(current_node));
+        let store = Arc::new(RwLock::new(Store::default()));
+
+        tokio::spawn(run_apply_worker(
+            Arc::clone(&current_node),
+            Arc::clone(&store),
+            apply_rx,
+            shd_rx.clone(),
+        ));
+
+        if let Err(e) = log::ensure_sentinel_entry(&lw_tx).await {
+            tracing::error!(error = ?e, "Failed to ensure sentinel log entry");
+        }
 
         tracing::info!(
             node_id = cluster.self_id,
@@ -53,7 +67,9 @@ fn main() -> anyhow::Result<()> {
         let server_handle = server::start(
             cluster.self_address.clone(),
             Arc::clone(&current_node),
+            Arc::clone(&store),
             lw_tx.clone(),
+            apply_tx.clone(),
             shd_tx.clone(),
             csus_tx.clone(),
         )
@@ -64,6 +80,7 @@ fn main() -> anyhow::Result<()> {
                 if let Err(_) = consensus::begin(
                     &cluster,
                     Arc::clone(&current_node),
+                    apply_tx.clone(),
                     (lw_tx.clone(), shd_rx.clone(), csus_rx.clone()),
                     rt,
                 )

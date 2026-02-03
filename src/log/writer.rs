@@ -1,11 +1,11 @@
 use crate::{
-    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
-    META_FILE_PATH,
     log::file::{
-        CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
-        open_file, open_or_create_file, validate_or_create_dir,
+        check_file_size_or_create, generate_file_name, get_file_size, get_log_files, open_file,
+        open_or_create_file, validate_or_create_dir, CheckStatus,
     },
     utils::file as file_utils,
+    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
+    META_FILE_PATH,
 };
 use anyhow::{Context, Result};
 use std::{
@@ -64,9 +64,9 @@ impl MetaBuffer {
 }
 
 pub struct LogWriter {
-    curr_log_file: BufWriter<File>,
+    pub(crate) curr_log_file: BufWriter<File>,
     meta_buffer: MetaBuffer,
-    data_dir_path: PathBuf,
+    pub(crate) data_dir_path: PathBuf,
 }
 
 impl LogWriter {
