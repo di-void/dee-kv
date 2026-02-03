@@ -3,12 +3,12 @@ pub mod log;
 mod serde;
 pub mod server;
 pub mod services;
-pub mod store;
+pub mod state;
 pub mod utils;
 
 #[derive(Debug)]
 pub enum Op {
-    Put(String, store::Types), // (key, value)
+    Put(String, state::Types), // (key, value)
     Delete(String),            // (key)
 }
 
@@ -44,7 +44,7 @@ pub const WILDCARD_NET_INT_STRING: &str = "wildcard";
 pub const LOCAL_HOST_IPV6: &str = "[::1]";
 pub const LOCAL_HOST_IPV4: &str = "127.0.0.1";
 pub const WILDCARD_IPV4: &str = "0.0.0.0";
-pub const MAX_LOG_FILE_SIZE: u64 = 5_000_000; // 5mb
+pub const MAX_LOG_FILE_SIZE: u64 = 3_000_000; // 3mb
 pub const META_FILE_PATH: &str = "./meta.json";
 pub const META_BUF_CAPACITY: u8 = 100; // 100 bytes (buffer capacity)
 pub const META_FILE_FLUSH_WRITES: u16 = 5; // flush to disk after this many writes

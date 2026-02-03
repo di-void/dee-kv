@@ -1,8 +1,9 @@
 use dee_kv::{
     ConsensusMessage, LogWriterMsg,
-    cluster::{self, CurrentNode, consensus},
     cluster::consensus_apply::{ApplyMsg, run_apply_worker},
-    log, server, store::Store,
+    cluster::{self, CurrentNode, consensus},
+    log, server,
+    state::Store,
     utils::env,
 };
 use tokio::{
@@ -40,7 +41,7 @@ fn main() -> anyhow::Result<()> {
         let (shd_tx, shd_rx) = watch::channel::<Option<()>>(None);
         let (csus_tx, csus_rx) = watch::channel(ConsensusMessage::Init);
         // initialize atomic last-log meta from on-disk logs before starting writer/server
-        let (disk_term, disk_last_idx) = log::get_log_meta();
+        let (disk_term, disk_last_idx) = log::get_last_log_meta();
         log::init_last_log_meta(disk_term, disk_last_idx);
         let lw_handle = log::init_log_writer(current_node.term, lw_rx);
         let current_node = Arc::new(RwLock::new(current_node));

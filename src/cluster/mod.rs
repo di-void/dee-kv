@@ -1,6 +1,5 @@
 pub mod config;
 pub mod consensus;
-pub mod hearbeats;
 pub mod consensus_apply;
 
 use serde::Deserialize;

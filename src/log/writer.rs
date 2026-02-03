@@ -1,11 +1,11 @@
 use crate::{
-    log::file::{
-        check_file_size_or_create, generate_file_name, get_file_size, get_log_files, open_file,
-        open_or_create_file, validate_or_create_dir, CheckStatus,
-    },
-    utils::file as file_utils,
     LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
     META_FILE_PATH,
+    log::file::{
+        CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
+        open_file, open_or_create_file, validate_or_create_dir,
+    },
+    utils::file as file_utils,
 };
 use anyhow::{Context, Result};
 use std::{
@@ -104,11 +104,11 @@ impl LogWriter {
 
     pub fn with_data_dir(dir_path: &str) -> Result<Self> {
         let data_dir_path = Path::new(dir_path);
+        let _ = validate_or_create_dir(data_dir_path)?; // parent path
         let mut meta_path = data_dir_path.to_path_buf();
         meta_path.push(Path::new(META_FILE_PATH));
         let meta_file = file_utils::open_or_create_file(meta_path.as_path())?;
         let log_file: File;
-        let _ = validate_or_create_dir(data_dir_path)?; // parent path
         let files = get_log_files(data_dir_path)?;
 
         if files.len() == 0 {

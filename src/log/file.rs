@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::serde::{CustomSerialize, Log, Payload, deserialize_entry};
-use crate::store::Types;
+use crate::state::Types;
 use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, MAX_LOG_FILE_SIZE, Term};
 
 pub fn generate_file_name() -> String {

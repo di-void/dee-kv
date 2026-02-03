@@ -2,7 +2,7 @@ name: dee-kv
 
 services:
   node1:
-    image: dee/kv-store
+    image: dee/kv
     build: .
     ports:
       - "50051:9000"
@@ -11,9 +11,11 @@ services:
     command:
       - --id=1
       - --config=./docker-cluster.config.json
+    environment:
+      RUST_LOG: info
 
   node2:
-    image: dee/kv-store
+    image: dee/kv
     build: .
     ports:
       - "50052:9000"
@@ -22,9 +24,11 @@ services:
     command:
       - --id=2
       - --config=./docker-cluster.config.json
+    environment:
+      RUST_LOG: info
 
   node3:
-    image: dee/kv-store
+    image: dee/kv
     build: .
     ports:
       - "50053:9000"
@@ -33,6 +37,8 @@ services:
     command:
       - --id=3
       - --config=./docker-cluster.config.json
+    environment:
+      RUST_LOG: info
 
 volumes:
   log-data:

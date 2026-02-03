@@ -5,7 +5,7 @@ use crate::{
     LOG_FILE_CHECK_TIMEOUT, LOG_FILE_DELIM,
     log::file::{get_log_files, open_file, replay_log_file, truncate_logs},
     serde::{CustomSerialize, NodeMeta, deserialize_entry},
-    store::Types,
+    state::Types,
 };
 use std::{
     collections::HashMap,
@@ -483,10 +483,10 @@ pub fn init_last_log_meta(term: LastTerm, idx: LastIdx) {
 /// # Examples
 ///
 /// ```
-/// let (_term, _index) = crate::log::get_log_meta();
+/// let (_term, _index) = crate::log::get_last_log_meta();
 /// // Use the returned term and index as needed.
 /// ```
-pub fn get_log_meta() -> (LastTerm, LastIdx) {
+pub fn get_last_log_meta() -> (LastTerm, LastIdx) {
     use crate::{LOG_FILE_DELIM, serde::deserialize_entry};
     use std::io::{Read, Seek, SeekFrom};
     use std::path::Path;

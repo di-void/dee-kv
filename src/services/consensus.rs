@@ -146,6 +146,7 @@ impl ConsensusSvc for ConsensusService {
         request: Request<AppendEntriesRequest>,
     ) -> Result<Response<AppendEntriesResponse>, Status> {
         let req = request.into_inner();
+        // TODO: reject requests from non-peers
         let leader_term = req.term as crate::Term;
         let leader_id = req.leader_id as u8;
         let prev_log_idx = req.prev_log_idx;
@@ -165,8 +166,8 @@ impl ConsensusSvc for ConsensusService {
         let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
 
         let mut need_persist = false;
-        let persist_term: crate::Term;
-        let persist_voted_for: Option<u8>;
+        let local_term: crate::Term;
+        let voted_for: Option<u8>;
 
         {
             let mut node = self.current_node.write().await;
@@ -185,21 +186,21 @@ impl ConsensusSvc for ConsensusService {
                 need_persist = true;
             }
 
-            persist_term = node.term;
-            persist_voted_for = node.voted_for.clone();
+            local_term = node.term;
+            voted_for = node.voted_for.clone();
         }
 
         if need_persist {
             let _ = self
                 .lw_tx
-                .send(LogWriterMsg::NodeMeta(persist_term, persist_voted_for))
+                .send(LogWriterMsg::NodeMeta(local_term, voted_for))
                 .await;
         }
 
         let local_last_index = crate::log::get_last_log_index();
         if prev_log_idx > local_last_index {
             return Ok(Response::new(AppendEntriesResponse {
-                term: persist_term.into(),
+                term: local_term.into(),
                 success: false,
                 conflict_term: None,
                 conflict_index: local_last_index.saturating_add(1),
@@ -208,19 +209,19 @@ impl ConsensusSvc for ConsensusService {
 
         if prev_log_idx > 0 {
             match crate::log::get_entry_term(prev_log_idx) {
-                Some(local_term) if (local_term as u32) != prev_log_term => {
+                Some(entry_term) if (entry_term as u32) != prev_log_term => {
                     let conflict_index =
-                        crate::log::find_first_index_of_term(local_term).unwrap_or(prev_log_idx);
+                        crate::log::find_first_index_of_term(entry_term).unwrap_or(prev_log_idx);
                     return Ok(Response::new(AppendEntriesResponse {
-                        term: persist_term.into(),
+                        term: local_term.into(),
                         success: false,
-                        conflict_term: Some(local_term as u32),
+                        conflict_term: Some(entry_term as u32),
                         conflict_index,
                     }));
                 }
                 None => {
                     return Ok(Response::new(AppendEntriesResponse {
-                        term: persist_term.into(),
+                        term: local_term.into(),
                         success: false,
                         conflict_term: None,
                         conflict_index: local_last_index.saturating_add(1),
@@ -248,7 +249,7 @@ impl ConsensusSvc for ConsensusService {
             };
 
             return Ok(Response::new(AppendEntriesResponse {
-                term: persist_term.into(),
+                term: local_term.into(),
                 success: true,
                 conflict_term: None,
                 conflict_index: 0,
@@ -331,7 +332,7 @@ impl ConsensusSvc for ConsensusService {
         };
 
         Ok(Response::new(AppendEntriesResponse {
-            term: persist_term.into(),
+            term: local_term.into(),
             success: true,
             conflict_term: None,
             conflict_index: 0,

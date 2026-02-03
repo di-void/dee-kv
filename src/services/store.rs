@@ -6,9 +6,9 @@ use crate::{
     LogWriterMsg, Op,
     store::{Store as KV, Types},
 };
+use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc::Sender};
 use tonic::{Request, Response, Status};
-use std::sync::Arc;
 
 pub struct StoreService {
     kv: Arc<RwLock<KV>>,

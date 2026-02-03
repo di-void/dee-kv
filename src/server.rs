@@ -4,7 +4,11 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::{ConsensusMessage, LogWriterMsg, cluster::{CurrentNode, consensus_apply::ApplyMsg}, store::Store};
+use crate::{
+    ConsensusMessage, LogWriterMsg,
+    cluster::{CurrentNode, consensus_apply::ApplyMsg},
+    store::Store,
+};
 use crate::{
     consensus_proto::consensus_service_server::ConsensusServiceServer,
     health_proto::health_check_service_server::HealthCheckServiceServer,

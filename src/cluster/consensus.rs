@@ -1,6 +1,8 @@
 use crate::{
     ConsensusMessage, LogWriterMsg,
-    cluster::{Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table, consensus_apply::ApplyMsg},
+    cluster::{
+        Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table, consensus_apply::ApplyMsg,
+    },
     consensus_proto::{
         AppendEntriesRequest, Command, Entry, RequestVoteRequest,
         consensus_service_client::ConsensusServiceClient,
@@ -293,7 +295,7 @@ async fn run_leader_heartbeats(
                     entries,
                 });
 
-                match timeout(Duration::from_millis(300), client.append_entries(req)).await {
+                match timeout(Duration::from_millis(500), client.append_entries(req)).await {
                     Ok(Ok(res)) => {
                         let resp = res.into_inner();
                         if resp.term > term.into() {
@@ -452,7 +454,6 @@ async fn update_commit_index(
         node.commit_index = candidate_index;
     }
 }
-
 
 #[tracing::instrument(skip_all, fields(cluster_name = %cc.name))]
 pub async fn begin(
