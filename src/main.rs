@@ -43,7 +43,7 @@ fn main() -> anyhow::Result<()> {
         // initialize atomic last-log meta from on-disk logs before starting writer/server
         let (disk_term, disk_last_idx) = log::get_last_log_meta();
         log::init_last_log_meta(disk_term, disk_last_idx);
-        let lw_handle = log::init_log_writer(current_node.term, lw_rx);
+        let lw_handle = log::writer::init_log_writer(current_node.term, lw_rx);
         let current_node = Arc::new(RwLock::new(current_node));
         let store = Arc::new(RwLock::new(Store::default()));
 

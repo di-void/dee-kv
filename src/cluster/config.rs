@@ -104,7 +104,7 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
                     last_ping: Instant::now(),
                     status: PeerStatus::Alive,
                     role: Default::default(),
-                    next_index: 0,
+                    next_index: 1,
                     match_index: 0,
                 };
 
@@ -130,7 +130,7 @@ pub async fn init_peers_table(p_nodes: &Vec<Node>) -> Result<PeersTable> {
                     status: PeerStatus::Dead,
                     role: Default::default(),
                     channel: builder.create_lazy_channel(),
-                    next_index: 0,
+                    next_index: 1,
                     match_index: 0,
                 };
 

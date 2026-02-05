@@ -7,7 +7,7 @@ use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::sync::Mutex;
 use tonic::transport::{Channel, Endpoint, Uri};
 
-use crate::Term;
+use crate::LogTerm;
 
 #[derive(Deserialize, Clone, Debug)]
 pub struct Node {
@@ -39,7 +39,7 @@ pub enum PeerStatus {
 #[derive(Debug)]
 pub struct CurrentNode {
     pub id: u8,
-    pub term: Term,
+    pub term: LogTerm,
     pub role: NodeRole,
     pub voted_for: Option<u8>,
     pub votes: u8,
@@ -54,7 +54,7 @@ impl CurrentNode {
     pub fn is_leader(&self) -> bool {
         self.role == NodeRole::Leader
     }
-    pub fn step_down(&mut self, term: Term) {
+    pub fn step_down(&mut self, term: LogTerm) {
         // in case of racing calls
         if term > self.term {
             self.term = term;

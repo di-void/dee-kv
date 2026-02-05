@@ -320,7 +320,7 @@ async fn run_leader_heartbeats(
                             let mut guard = peer.lock().await;
                             let next_index = match resp.conflict_term {
                                 Some(conflict_term) => crate::log::find_first_index_of_term(
-                                    conflict_term as crate::Term,
+                                    conflict_term as crate::LogTerm,
                                 )
                                 .unwrap_or(resp.conflict_index),
                                 None => resp.conflict_index,
@@ -382,7 +382,7 @@ async fn run_leader_heartbeats(
     }
 }
 
-fn build_append_entries(entries: Vec<crate::serde::Log>) -> Vec<Entry> {
+fn build_append_entries(entries: Vec<crate::serde::LogEntry>) -> Vec<Entry> {
     entries
         .into_iter()
         .map(|entry| {
@@ -417,8 +417,8 @@ async fn update_commit_index(
         Arc<tokio::sync::Mutex<Peer>>,
     )>,
     quorum: u8,
-    curr_term: crate::Term,
-    commit_index: u32,
+    curr_term: crate::LogTerm,
+    curr_commit_index: u32,
 ) {
     let mut match_indexes = Vec::with_capacity(clients.len() + 1);
     match_indexes.push(crate::log::get_last_log_index());
@@ -435,7 +435,7 @@ async fn update_commit_index(
     }
 
     let candidate_index = match_indexes[quorum_index];
-    if candidate_index <= commit_index {
+    if candidate_index <= curr_commit_index {
         return;
     }
 

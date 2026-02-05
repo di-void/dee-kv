@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-use crate::{Term, LOG_FILE_DELIM};
+use crate::{LOG_FILE_DELIM, LogIndex, LogTerm};
 
 pub trait CustomSerialize {
     fn serialize(&self) -> Result<String>;
@@ -14,14 +14,14 @@ pub enum Payload {
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct Log {
+pub struct LogEntry {
     pub payload: Payload,
-    pub term: Term,
-    pub index: u32,
+    pub term: LogTerm,
+    pub index: LogIndex,
 }
 
 // Each log entry now includes a monotonic `index` for fast lookups.
-impl Log {
+impl LogEntry {
     /// Creates a `Log` record using the provided operation, payload, term, and index.
     ///
     /// The `index` is the record's monotonic position used for lookups and ordering.
@@ -29,9 +29,9 @@ impl Log {
     /// # Examples
     ///
     /// ```
-    /// use crate::{Log, Payload, Term};
+    /// use crate::{Log, Payload, LogTerm};
     /// let payload = Payload::Put { key: "k".into(), value: "v".into() };
-    /// let term: Term = 1;
+    /// let term: LogTerm = 1;
     /// let log = Log::with_index(payload, term, 42);
     ///
     /// assert_eq!(log.term, 1);
@@ -41,8 +41,8 @@ impl Log {
     ///     assert_eq!(value, "v");
     /// }
     /// ```
-    pub fn with_index(payload: Payload, term: Term, index: u32) -> Self {
-        Log {
+    pub fn with_index(payload: Payload, term: LogTerm, index: LogIndex) -> Self {
+        Self {
             payload,
             term,
             index,
@@ -52,7 +52,7 @@ impl Log {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct NodeMeta {
-    pub current_term: Term,
+    pub current_term: LogTerm,
     pub voted_for: Option<u8>,
 }
 
@@ -62,7 +62,7 @@ impl CustomSerialize for NodeMeta {
     }
 }
 
-impl CustomSerialize for Log {
+impl CustomSerialize for LogEntry {
     fn serialize(&self) -> Result<String> {
         let mut s = serialize_entry(self)?;
         s.push_str(LOG_FILE_DELIM);

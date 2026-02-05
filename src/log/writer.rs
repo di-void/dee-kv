@@ -1,186 +1,231 @@
 use crate::{
-    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
-    META_FILE_PATH,
-    log::file::{
-        CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
-        open_file, open_or_create_file, validate_or_create_dir,
-    },
-    utils::file as file_utils,
+    DATA_DIR, LOG_FILE_CHECK_TIMEOUT, LogIndex, LogMessage, LogTerm, Op,
+    log::{LAST_LOG_INDEX, LAST_LOG_TERM, file::truncate_logs},
+    serde::{CustomSerialize, LogEntry, NodeMeta, Payload},
 };
-use anyhow::{Context, Result};
+use anyhow::Context;
 use std::{
-    fs::File,
-    io::{BufWriter, Seek, SeekFrom, Write},
-    path::{Path, PathBuf},
+    io::Write,
+    sync::atomic::Ordering,
+    thread::{self, JoinHandle},
+    time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
-/// A buffer for meta writes that overwrites its contents on each write,
-/// grows dynamically as needed, and periodically flushes to disk by overwriting the file.
-pub struct MetaBuffer {
-    file: File,
-    buffer: Vec<u8>,
-    len: usize,
-    write_count: u16,
-    flush_threshold: u16,
-}
+/// Starts a dedicated thread that serializes and persists log entries and node metadata.
+///
+/// The spawned thread listens on the provided `rx` receiver for `LogWriterMsg` commands:
+/// - `LogAppend(Op::Put)` and `LogAppend(Op::Delete)`: serialize a `Log` with the current term and next index,
+///   append it to the log file, update the atomics `LAST_LOG_INDEX` and `LAST_LOG_TERM`, and increment the next index.
+/// - `AppendEntry { .. }`: serialize a `Log` with provided term and index, append it, and update atomics.
+/// - `Truncate { last_index }`: rebuild log files up to `last_index` and update atomics.
+/// - `NodeMeta(current_term, voted_for)`: serialize and write node metadata to the meta file and update the active term.
+/// - `ShutDown`: stop the writer thread and return.
+///
+/// The function panics if the underlying `LogWriter` cannot be initialized. The caller is responsible for joining
+/// the returned handle to observe thread termination.
+///
+/// # Examples
+///
+/// ```
+/// use tokio::sync::mpsc;
+/// use crate::log::{init_log_writer, LogWriterMsg, Term};
+///
+/// // create a channel and start the writer thread
+/// let (tx, rx) = mpsc::channel(1);
+/// let handle = init_log_writer(1 as Term, rx);
+///
+/// // request shutdown and wait for the writer to exit
+/// let _ = tokio::spawn(async move { let _ = tx.send(LogWriterMsg::ShutDown).await; });
+/// handle.join().unwrap();
+/// ```
+pub fn init_log_writer(curr_term: LogTerm, mut rx: mpsc::Receiver<LogMessage>) -> JoinHandle<()> {
+    use super::Log;
 
-impl MetaBuffer {
-    pub fn new(file: File, capacity: usize, flush_threshold: u16) -> Self {
-        Self {
-            file,
-            buffer: vec![0u8; capacity],
-            len: 0,
-            write_count: 0,
-            flush_threshold,
-        }
-    }
+    let handle = thread::spawn(move || {
+        let mut term = curr_term;
+        // initialize next_index from the atomic last index (should be set at startup)
+        let mut next_index: LogIndex = LAST_LOG_INDEX.load(Ordering::SeqCst).saturating_add(1);
 
-    /// Overwrites the buffer with the given payload, resizing if necessary.
-    pub fn write(&mut self, payload: &[u8]) -> usize {
-        if payload.len() > self.buffer.len() {
-            self.buffer.resize(payload.len(), 0);
-        }
-        let bytes_to_write = payload.len();
-        self.buffer[..bytes_to_write].copy_from_slice(payload);
-        self.len = bytes_to_write;
-        self.write_count += 1;
-        bytes_to_write
-    }
+        let mut log = match Log::from_data_dir(DATA_DIR) {
+            Ok(lw) => lw,
+            Err(e) => {
+                tracing::error!(
+                    error = ?e,
+                    "Failed to initialize log writer, killing writer thread"
+                );
+                panic!("Writer thread panicked on startup!");
+            }
+        };
 
-    /// Returns true if the write count has reached the flush threshold.
-    pub fn should_flush(&self) -> bool {
-        self.write_count >= self.flush_threshold
-    }
+        tracing::info!("Log writer thread started");
 
-    /// Flushes the buffer to disk by seeking to the start and overwriting.
-    pub fn flush(&mut self) -> std::io::Result<()> {
-        self.file.seek(SeekFrom::Start(0))?;
-        self.file.write_all(&self.buffer[..self.len])?;
-        self.file.set_len(self.len as u64)?; // Truncate file to current content size
-        self.file.sync_all()?;
-        self.write_count = 0;
-        Ok(())
-    }
-}
+        let mut now = Instant::now();
+        let mut check_delta = false;
+        let timeout = Duration::from_millis(LOG_FILE_CHECK_TIMEOUT as u64);
 
-pub struct LogWriter {
-    pub(crate) curr_log_file: BufWriter<File>,
-    meta_buffer: MetaBuffer,
-    pub(crate) data_dir_path: PathBuf,
-}
-
-struct LogCache {
-    buf: Vec<u8>,
-}
-
-pub struct Log {
-    cache: LogCache,
-    meta_buf: MetaBuffer,
-    curr_log_file: BufWriter<File>,
-    data_dir: PathBuf,
-}
-
-impl Log {
-    pub fn append(&mut self, payload: &[u8], should_check: bool) {}
-    pub fn write_meta(&mut self, payload: &[u8]) {}
-    pub fn get_entry(idx: u32) {}
-    pub fn get_entries_from(idx: u32, max: u16) {}
-    pub fn get_first_index_of_term(term: u32) {}
-    pub fn with_data_dir(dir_path: &str) {}
-}
-
-impl LogWriter {
-    pub fn append_log(&mut self, payload: &[u8], should_check: bool) -> Result<usize> {
-        if should_check {
-            let f_meta = self.curr_log_file.get_ref().metadata()?;
-            if let CheckStatus::Over(fh) = check_file_size_or_create(
-                get_file_size(&f_meta),
-                LOG_FILE_MAX_DELTA,
-                &self.data_dir_path,
-            )? {
-                self.curr_log_file = BufWriter::new(fh);
+        loop {
+            let msg = match rx.blocking_recv() {
+                Some(msg) => msg,
+                _ => break,
             };
-        }
 
-        let bytes = self
-            .curr_log_file
-            .write(payload)
-            .with_context(|| format!("Failed to append to log writing payload: {:?}", payload))?;
+            if now.elapsed() >= timeout {
+                now = Instant::now();
+                check_delta = true;
+            }
 
-        Ok(bytes)
-    }
+            match msg {
+                LogMessage::Append { op, meta } => match op {
+                    Op::Delete(key) => {
+                        if meta.is_some() {
+                            let (trm, idx) = meta.unwrap();
+                            if term != trm || next_index != idx {
+                                term = trm;
+                                next_index = idx;
+                            };
+                        }
 
-    /// Writes metadata by overwriting the in-memory buffer.
-    /// Flushes to disk after `META_FILE_FLUSH_WRITES` writes.
-    pub fn write_meta(&mut self, payload: &[u8]) -> Result<usize> {
-        let bytes = self.meta_buffer.write(payload);
-        if self.meta_buffer.should_flush() {
-            self.meta_buffer
-                .flush()
-                .with_context(|| "Failed to flush meta buffer to disk")?;
-        }
-        Ok(bytes)
-    }
+                        let log_entry = LogEntry::with_index(
+                            Payload::Delete { key: key.clone() },
+                            term,
+                            next_index,
+                        );
+                        let payload = log_entry
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Delete payload: ({})", &key)
+                            })
+                            .unwrap();
 
-    pub fn with_data_dir(dir_path: &str) -> Result<Self> {
-        let data_dir_path = Path::new(dir_path);
-        let _ = validate_or_create_dir(data_dir_path)?; // parent path
-        let mut meta_path = data_dir_path.to_path_buf();
-        meta_path.push(Path::new(META_FILE_PATH));
-        let meta_file = file_utils::open_or_create_file(meta_path.as_path())?;
-        let log_file: File;
-        let files = get_log_files(data_dir_path)?;
+                        let b = log
+                            .append(payload.as_bytes(), check_delta)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
 
-        if files.len() == 0 {
-            let fname = generate_file_name();
-            log_file = open_or_create_file(&fname, data_dir_path).with_context(|| {
-                format!(
-                    "Failed to create new file at: {:?}/{:?}",
-                    data_dir_path.to_str().unwrap(),
-                    fname
-                )
-            })?;
-        } else {
-            let latest = &files[files.len() - 1];
-            let res = check_file_size_or_create(
-                get_file_size(&latest.meta),
-                LOG_FILE_MAX_DELTA,
-                data_dir_path,
-            )?;
-            match res {
-                CheckStatus::Good => {
-                    let fh = open_file(&latest.file_path).with_context(|| {
-                        format!("Failed to open file at path: {:?}", &latest.file_path)
-                    })?;
+                        check_delta = false;
 
-                    log_file = fh;
+                        LAST_LOG_INDEX.store(next_index, Ordering::SeqCst);
+                        LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
+
+                        // increment index after successful append
+                        next_index = next_index.saturating_add(1);
+
+                        tracing::debug!(
+                            bytes = b,
+                            index = next_index - 1,
+                            term = term,
+                            "Wrote Delete operation to log"
+                        );
+                    }
+                    Op::Put(key, val) => {
+                        if meta.is_some() {
+                            let (trm, idx) = meta.unwrap();
+                            if term != trm || next_index != idx {
+                                term = trm;
+                                next_index = idx;
+                            };
+                        }
+
+                        let log_entry = LogEntry::with_index(
+                            Payload::Put {
+                                key: key.clone(),
+                                value: val.clone().into(),
+                            },
+                            term,
+                            next_index,
+                        );
+                        let payload = log_entry
+                            .serialize()
+                            .with_context(|| {
+                                format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
+                            })
+                            .unwrap();
+
+                        let b = log
+                            .append(payload.as_bytes(), check_delta)
+                            .with_context(|| format!("Failed to append to log file"))
+                            .unwrap();
+
+                        check_delta = false;
+
+                        LAST_LOG_INDEX.store(next_index, Ordering::SeqCst);
+                        LAST_LOG_TERM.store(term as u32, Ordering::SeqCst);
+                        next_index = next_index.saturating_add(1);
+
+                        tracing::debug!(
+                            bytes = b,
+                            index = next_index - 1,
+                            term = term,
+                            "Wrote Put operation to log"
+                        );
+                    }
+                },
+                LogMessage::Truncate { last_index } => {
+                    if let Err(e) = log.curr_log_file.flush() {
+                        tracing::error!(error = ?e, "Failed to flush log file before truncation");
+                    }
+
+                    let (new_writer, last_term, last_idx, old_paths) =
+                        truncate_logs(&log.data_dir, last_index)
+                            .with_context(|| {
+                                format!("Failed to truncate log to index: {}", last_index)
+                            })
+                            .unwrap();
+
+                    let old_writer = std::mem::replace(&mut log.curr_log_file, new_writer);
+                    drop(old_writer);
+
+                    for path in old_paths {
+                        if let Err(e) = std::fs::remove_file(&path) {
+                            tracing::error!(error = ?e, file = ?path, "Failed to remove old log file");
+                        }
+                    }
+
+                    LAST_LOG_INDEX.store(last_idx, Ordering::SeqCst);
+                    LAST_LOG_TERM.store(last_term as u32, Ordering::SeqCst);
+                    next_index = last_idx.saturating_add(1);
+
+                    tracing::info!(
+                        last_index = last_idx,
+                        last_term = last_term,
+                        "Truncated log"
+                    );
                 }
-                CheckStatus::Over(fh) => log_file = fh,
+                LogMessage::NodeMeta(current_term, voted_for) => {
+                    let meta = NodeMeta {
+                        current_term,
+                        voted_for,
+                    };
+
+                    if current_term != term {
+                        tracing::info!(
+                            prev_term = term,
+                            term = current_term,
+                            voted_for = ?voted_for,
+                            "Persisting updated term to meta store"
+                        );
+                    }
+                    term = current_term;
+
+                    let payload = meta
+                        .serialize()
+                        .with_context(|| format!("Failed to serliaze meta object: {:?}", meta))
+                        .unwrap();
+
+                    let b = log
+                        .write_meta(payload.as_bytes())
+                        .with_context(|| format!("Failed to write to meta file"))
+                        .unwrap();
+
+                    tracing::debug!(bytes = b, "Wrote node metadata to meta file");
+                }
+                LogMessage::ShutDown => break,
             }
         }
 
-        Ok(Self {
-            curr_log_file: BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), log_file),
-            meta_buffer: MetaBuffer::new(
-                meta_file,
-                META_BUF_CAPACITY.into(),
-                META_FILE_FLUSH_WRITES,
-            ),
-            data_dir_path: data_dir_path.to_path_buf(),
-        })
-    }
-}
+        tracing::info!("Log writer thread shutting down");
+    });
 
-impl Drop for LogWriter {
-    fn drop(&mut self) {
-        match self.curr_log_file.flush() {
-            Ok(_) => println!("[LOG WRITER]: Flushed buffer successfully!"),
-            Err(e) => println!("[LOG WRITER]: An error occurred while flushing: {:?}", e),
-        }
-
-        match self.meta_buffer.flush() {
-            Ok(_) => println!("[META FILE]: Flushed buffer successfully!"),
-            Err(e) => println!("[META FILE]: An error occurred while flushing: {:?}", e),
-        }
-    }
+    handle
 }

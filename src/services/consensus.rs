@@ -45,7 +45,7 @@ impl ConsensusSvc for ConsensusService {
         request: Request<RequestVoteRequest>,
     ) -> Result<Response<RequestVoteResponse>, Status> {
         let req = request.into_inner();
-        let candidate_term = req.term as crate::Term;
+        let candidate_term = req.term as crate::LogTerm;
         let candidate_id = req.candidate_id as u8;
         let candidate_last_term = req.last_log_term;
         let candidate_last_index = req.last_log_index;
@@ -147,7 +147,7 @@ impl ConsensusSvc for ConsensusService {
     ) -> Result<Response<AppendEntriesResponse>, Status> {
         let req = request.into_inner();
         // TODO: reject requests from non-peers
-        let leader_term = req.term as crate::Term;
+        let leader_term = req.term as crate::LogTerm;
         let leader_id = req.leader_id as u8;
         let prev_log_idx = req.prev_log_idx;
         let prev_log_term = req.prev_log_term;
@@ -166,7 +166,7 @@ impl ConsensusSvc for ConsensusService {
         let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
 
         let mut need_persist = false;
-        let local_term: crate::Term;
+        let local_term: crate::LogTerm;
         let voted_for: Option<u8>;
 
         {
@@ -239,14 +239,15 @@ impl ConsensusSvc for ConsensusService {
                 let mut node = self.current_node.write().await;
                 if commit_index > node.commit_index {
                     node.commit_index = commit_index;
+                    drop(node);
+
+                    if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+                        // apply committed entries
+                        tracing::error!(error = ?err, "Apply channel closed");
+                        return Err(Status::internal("apply worker unavailable"));
+                    };
                 }
             }
-
-            if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
-                // apply committed entries
-                tracing::error!(error = ?err, "Apply channel closed");
-                return Err(Status::internal("apply worker unavailable"));
-            };
 
             return Ok(Response::new(AppendEntriesResponse {
                 term: local_term.into(),
@@ -299,7 +300,7 @@ impl ConsensusSvc for ConsensusService {
                 }
             };
 
-            let entry_term = entry.term as crate::Term;
+            let entry_term = entry.term as crate::LogTerm;
             let entry_index = entry.idx;
 
             if let Err(err) = self
@@ -321,14 +322,15 @@ impl ConsensusSvc for ConsensusService {
             let mut node = self.current_node.write().await;
             if commit_index > node.commit_index {
                 node.commit_index = commit_index;
+                drop(node);
+
+                if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
+                    // apply committed entries
+                    tracing::error!(error = ?err, "Apply channel closed");
+                    return Err(Status::internal("apply worker unavailable"));
+                };
             }
         }
-
-        if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
-            // apply committed entries
-            tracing::error!(error = ?err, "Apply channel closed");
-            return Err(Status::internal("apply worker unavailable"));
-        };
 
         Ok(Response::new(AppendEntriesResponse {
             term: local_term.into(),

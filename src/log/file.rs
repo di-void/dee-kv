@@ -7,9 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::serde::{CustomSerialize, Log, Payload, deserialize_entry};
+use crate::serde::{CustomSerialize, LogEntry, Payload, deserialize_entry};
 use crate::state::Types;
-use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, MAX_LOG_FILE_SIZE, Term};
+use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, LogTerm, MAX_LOG_FILE_SIZE};
 
 pub fn generate_file_name() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -118,7 +118,7 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
             return;
         }
 
-        let log = match deserialize_entry::<Log>(&bytes) {
+        let log = match deserialize_entry::<LogEntry>(&bytes) {
             Ok(log) => log,
             _ => return,
         };
@@ -143,9 +143,9 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
 pub fn truncate_logs(
     parent_path: &Path,
     last_index: u32,
-) -> Result<(BufWriter<File>, Term, u32, Vec<PathBuf>)> {
+) -> Result<(BufWriter<File>, LogTerm, u32, Vec<PathBuf>)> {
     let files = get_log_files(parent_path)?;
-    let mut entries: Vec<Log> = Vec::new();
+    let mut entries: Vec<LogEntry> = Vec::new();
     let mut done = false;
     let delim = LOG_FILE_DELIM.as_bytes()[0];
 
@@ -158,7 +158,7 @@ pub fn truncate_logs(
             if bytes.is_empty() {
                 continue;
             }
-            let log = deserialize_entry::<Log>(&bytes)?;
+            let log = deserialize_entry::<LogEntry>(&bytes)?;
             if log.index <= last_index {
                 entries.push(log);
             } else {

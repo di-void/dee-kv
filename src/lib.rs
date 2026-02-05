@@ -15,12 +15,12 @@ pub enum Op {
 pub enum LogMessage {
     Append {
         op: Op,
-        meta: Option<(Term, LogIdx)>,
+        meta: Option<(LogTerm, LogIndex)>,
     },
     Truncate {
         last_index: u32,
     },
-    NodeMeta(Term, Option<u8>), // (currentTerm, votedFor)
+    NodeMeta(LogTerm, Option<u8>), // (currentTerm, votedFor)
     ShutDown,
 }
 
@@ -39,8 +39,8 @@ pub mod consensus_proto {
     tonic::include_proto!("consensus");
 }
 
-pub type Term = u16;
-pub type LogIdx = u32;
+pub type LogTerm = u16;
+pub type LogIndex = u32;
 
 pub const DATA_DIR: &str = "./DATA";
 pub const LOOPBACK_NET_INT_STRING: &str = "loopback";

@@ -1,4 +1,7 @@
-use crate::{log::load_store, serde::Log, serde::Payload, DATA_DIR};
+use crate::{
+    DATA_DIR,
+    serde::{LogEntry, Payload},
+};
 use anyhow::Context;
 use std::collections::HashMap;
 use std::path::Path;
@@ -9,13 +12,13 @@ pub enum Types {
 }
 
 pub struct Store {
-    _store: HashMap<String, Types>,
+    inner: HashMap<String, Types>,
 }
 
 impl Default for Store {
     fn default() -> Self {
         Self {
-            _store: load_store(Path::new(DATA_DIR))
+            inner: crate::log::rebuild(Path::new(DATA_DIR))
                 .with_context(|| format!("Error occurred while loading store"))
                 .unwrap(),
         }
@@ -24,18 +27,18 @@ impl Default for Store {
 
 impl Store {
     pub fn get(&self, k: &str) -> Option<Types> {
-        self._store.get(k).map(|v| v.to_owned())
+        self.inner.get(k).map(|v| v.to_owned())
     }
 
     pub fn set(&mut self, kv: (&str, Types)) {
-        self._store.insert(kv.0.to_string(), kv.1);
+        self.inner.insert(kv.0.to_string(), kv.1);
     }
 
     pub fn delete(&mut self, k: &str) -> Option<Types> {
-        self._store.remove(k)
+        self.inner.remove(k)
     }
 
-    pub fn apply_log(&mut self, log: &Log) {
+    pub fn apply_log(&mut self, log: &LogEntry) {
         match &log.payload {
             Payload::Put { key, value } => {
                 self.set((key, value.clone().into()));
