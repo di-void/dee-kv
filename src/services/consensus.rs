@@ -1,5 +1,5 @@
 use crate::{
-    ConsensusMessage, LogWriterMsg, Op,
+    ConsensusMessage, LogMessage, Op,
     cluster::CurrentNode,
     cluster::consensus_apply::ApplyMsg,
     consensus_proto::{
@@ -17,7 +17,7 @@ use tonic::{Request, Response, Status, transport::Channel};
 #[derive(Clone)]
 pub struct ConsensusService {
     current_node: Arc<RwLock<CurrentNode>>,
-    lw_tx: mpsc::Sender<LogWriterMsg>,
+    lw_tx: mpsc::Sender<LogMessage>,
     csus_tx: watch::Sender<ConsensusMessage>,
     apply_tx: mpsc::Sender<ApplyMsg>,
 }
@@ -25,7 +25,7 @@ pub struct ConsensusService {
 impl ConsensusService {
     pub fn with_state(
         current_node: Arc<RwLock<CurrentNode>>,
-        lw_tx: mpsc::Sender<LogWriterMsg>,
+        lw_tx: mpsc::Sender<LogMessage>,
         csus_tx: watch::Sender<ConsensusMessage>,
         apply_tx: mpsc::Sender<ApplyMsg>,
     ) -> Self {
@@ -118,7 +118,7 @@ impl ConsensusSvc for ConsensusService {
 
             let _ = self
                 .lw_tx
-                .send(LogWriterMsg::NodeMeta(persist_term, persist_voted_for))
+                .send(LogMessage::NodeMeta(persist_term, persist_voted_for))
                 .await;
 
             // reset election timer
@@ -193,7 +193,7 @@ impl ConsensusSvc for ConsensusService {
         if need_persist {
             let _ = self
                 .lw_tx
-                .send(LogWriterMsg::NodeMeta(local_term, voted_for))
+                .send(LogMessage::NodeMeta(local_term, voted_for))
                 .await;
         }
 
@@ -260,7 +260,7 @@ impl ConsensusSvc for ConsensusService {
 
         if let Err(err) = self
             .lw_tx
-            .send(LogWriterMsg::Truncate {
+            .send(LogMessage::Truncate {
                 last_index: prev_log_idx,
             })
             .await
@@ -304,10 +304,9 @@ impl ConsensusSvc for ConsensusService {
 
             if let Err(err) = self
                 .lw_tx
-                .send(LogWriterMsg::AppendEntry {
+                .send(LogMessage::Append {
                     op,
-                    term: entry_term,
-                    index: entry_index,
+                    meta: Some((entry_term, entry_index)),
                 })
                 .await
             {

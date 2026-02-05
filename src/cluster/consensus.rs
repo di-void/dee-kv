@@ -1,5 +1,5 @@
 use crate::{
-    ConsensusMessage, LogWriterMsg,
+    ConsensusMessage, LogMessage,
     cluster::{
         Cluster, CurrentNode, Peer, PeersTable, config::init_peers_table, consensus_apply::ApplyMsg,
     },
@@ -53,7 +53,7 @@ pub async fn start_election(
     p_table: Arc<PeersTable>,
     mut csus_rx: watch::Receiver<ConsensusMessage>,
     mut shutdown_rx: watch::Receiver<Option<()>>,
-    lw: mpsc::Sender<LogWriterMsg>, // log-writer
+    lw: mpsc::Sender<LogMessage>, // log-writer
 ) -> Result<()> {
     use crate::utils::cluster::get_random_election_timeout;
 
@@ -93,7 +93,7 @@ pub async fn start_election(
                 term = cw.term,
                 "Transitioned to Candidate, requesting votes"
             );
-            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+            lw.send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
                 .await
                 .unwrap();
         };
@@ -181,7 +181,7 @@ pub async fn start_election(
                                 "Discovered higher term, stepping down to Follower"
                             );
                             cw.step_down(peer_term as u16);
-                            lw.send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                            lw.send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
                                 .await
                                 .unwrap();
                             break;
@@ -204,7 +204,7 @@ async fn run_leader_heartbeats(
     apply_tx: mpsc::Sender<ApplyMsg>,
     p_table: Arc<PeersTable>,
     sd_rx: watch::Receiver<Option<()>>,
-    lw_tx: mpsc::Sender<LogWriterMsg>,
+    lw_tx: mpsc::Sender<LogMessage>,
     quorum: u8,
 ) {
     let pt = Arc::clone(&p_table);
@@ -225,7 +225,7 @@ async fn run_leader_heartbeats(
             let current_term = cw.term;
             cw.step_down(current_term);
             lw_tx
-                .send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                .send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
                 .await
                 .unwrap();
             return;
@@ -363,7 +363,7 @@ async fn run_leader_heartbeats(
                 );
                 cw.step_down(peer_term as u16);
                 lw_tx
-                    .send(LogWriterMsg::NodeMeta(cw.term, cw.voted_for.clone()))
+                    .send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
                     .await
                     .unwrap();
             }
@@ -461,7 +461,7 @@ pub async fn begin(
     current_node: Arc<RwLock<CurrentNode>>,
     apply_tx: mpsc::Sender<ApplyMsg>,
     tx_rx: (
-        mpsc::Sender<LogWriterMsg>,  // log-writer
+        mpsc::Sender<LogMessage>,    // log-writer
         watch::Receiver<Option<()>>, // shutdown
         watch::Receiver<ConsensusMessage>,
     ),

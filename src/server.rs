@@ -5,9 +5,9 @@ use tokio::{
 };
 
 use crate::{
-    ConsensusMessage, LogWriterMsg,
+    ConsensusMessage, LogMessage,
     cluster::{CurrentNode, consensus_apply::ApplyMsg},
-    store::Store,
+    state::Store,
 };
 use crate::{
     consensus_proto::consensus_service_server::ConsensusServiceServer,
@@ -20,7 +20,7 @@ pub async fn start(
     addr: std::net::SocketAddr,
     current_node: Arc<RwLock<CurrentNode>>,
     store: Arc<RwLock<Store>>,
-    lw_tx: mpsc::Sender<LogWriterMsg>,
+    lw_tx: mpsc::Sender<LogMessage>,
     apply_tx: mpsc::Sender<ApplyMsg>,
     sd_tx: watch::Sender<Option<()>>,
     csus_tx: watch::Sender<ConsensusMessage>,
@@ -58,7 +58,7 @@ pub async fn start(
 
 #[cfg(windows)]
 async fn shutdown_server(
-    lw_tx: mpsc::Sender<LogWriterMsg>,
+    lw_tx: mpsc::Sender<LogMessage>,
     s_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
     use tokio::signal;
@@ -70,7 +70,7 @@ async fn shutdown_server(
 
 #[cfg(unix)]
 async fn shutdown_server(
-    lw_tx: mpsc::Sender<LogWriterMsg>,
+    lw_tx: mpsc::Sender<LogMessage>,
     s_tx: watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
     use tokio::signal::unix::{SignalKind, signal};
@@ -97,10 +97,10 @@ async fn shutdown_server(
 }
 
 async fn issue_shutdown(
-    lw_tx: &mpsc::Sender<LogWriterMsg>,
+    lw_tx: &mpsc::Sender<LogMessage>,
     s_tx: &watch::Sender<Option<()>>,
 ) -> anyhow::Result<()> {
-    lw_tx.send(LogWriterMsg::ShutDown).await?; // shutdown log writer
+    lw_tx.send(LogMessage::ShutDown).await?; // shutdown log writer
     if let Err(e) = s_tx.send(Some(())) {
         tracing::error!(error = ?e, "Failed to send shutdown message");
     };

@@ -12,10 +12,14 @@ pub enum Op {
     Delete(String),            // (key)
 }
 
-pub enum LogWriterMsg {
-    LogAppend(Op),
-    AppendEntry { op: Op, term: Term, index: u32 },
-    Truncate { last_index: u32 },
+pub enum LogMessage {
+    Append {
+        op: Op,
+        meta: Option<(Term, LogIdx)>,
+    },
+    Truncate {
+        last_index: u32,
+    },
     NodeMeta(Term, Option<u8>), // (currentTerm, votedFor)
     ShutDown,
 }
@@ -36,7 +40,7 @@ pub mod consensus_proto {
 }
 
 pub type Term = u16;
-pub type LogIdx = u64;
+pub type LogIdx = u32;
 
 pub const DATA_DIR: &str = "./DATA";
 pub const LOOPBACK_NET_INT_STRING: &str = "loopback";

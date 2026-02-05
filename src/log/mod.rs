@@ -1,3 +1,4 @@
+mod cache;
 mod file;
 mod writer;
 
@@ -16,7 +17,7 @@ use std::{
 };
 
 use crate::serde::{Log, Payload};
-use crate::{DATA_DIR, LogWriterMsg, Op, Term};
+use crate::{DATA_DIR, LogMessage, Op, Term};
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicU32, Ordering};
 use tokio::sync::mpsc;
@@ -48,7 +49,7 @@ use tokio::sync::mpsc;
 /// let _ = tokio::spawn(async move { let _ = tx.send(LogWriterMsg::ShutDown).await; });
 /// handle.join().unwrap();
 /// ```
-pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) -> JoinHandle<()> {
+pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogMessage>) -> JoinHandle<()> {
     use writer::LogWriter;
 
     let handle = thread::spawn(move || {
@@ -85,8 +86,16 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
             }
 
             match msg {
-                LogWriterMsg::LogAppend(op) => match op {
+                LogMessage::Append { op, meta } => match op {
                     Op::Delete(key) => {
+                        if meta.is_some() {
+                            let (trm, idx) = meta.unwrap();
+                            if term != trm || next_index != idx {
+                                term = trm;
+                                next_index = idx;
+                            };
+                        }
+
                         let log =
                             Log::with_index(Payload::Delete { key: key.clone() }, term, next_index);
                         let payload = log
@@ -117,6 +126,14 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         );
                     }
                     Op::Put(key, val) => {
+                        if meta.is_some() {
+                            let (trm, idx) = meta.unwrap();
+                            if term != trm || next_index != idx {
+                                term = trm;
+                                next_index = idx;
+                            };
+                        }
+
                         let log = Log::with_index(
                             Payload::Put {
                                 key: key.clone(),
@@ -151,78 +168,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         );
                     }
                 },
-                LogWriterMsg::AppendEntry {
-                    op,
-                    term: entry_term,
-                    index,
-                } => match op {
-                    Op::Delete(key) => {
-                        let log = Log::with_index(
-                            Payload::Delete { key: key.clone() },
-                            entry_term,
-                            index,
-                        );
-                        let payload = log
-                            .serialize()
-                            .with_context(|| {
-                                format!("Failed to serialize Delete payload: ({})", &key)
-                            })
-                            .unwrap();
-
-                        let b = log_w
-                            .append_log(payload.as_bytes(), check_delta)
-                            .with_context(|| format!("Failed to append to log file"))
-                            .unwrap();
-
-                        check_delta = false;
-
-                        LAST_LOG_INDEX.store(index, Ordering::SeqCst);
-                        LAST_LOG_TERM.store(entry_term as u32, Ordering::SeqCst);
-                        next_index = index.saturating_add(1);
-
-                        tracing::debug!(
-                            bytes = b,
-                            index = index,
-                            term = entry_term,
-                            "Wrote Delete operation to log"
-                        );
-                    }
-                    Op::Put(key, val) => {
-                        let log = Log::with_index(
-                            Payload::Put {
-                                key: key.clone(),
-                                value: val.clone().into(),
-                            },
-                            entry_term,
-                            index,
-                        );
-                        let payload = log
-                            .serialize()
-                            .with_context(|| {
-                                format!("Failed to serialize Put payload: ({}:{:?})", &key, &val)
-                            })
-                            .unwrap();
-
-                        let b = log_w
-                            .append_log(payload.as_bytes(), check_delta)
-                            .with_context(|| format!("Failed to append to log file"))
-                            .unwrap();
-
-                        check_delta = false;
-
-                        LAST_LOG_INDEX.store(index, Ordering::SeqCst);
-                        LAST_LOG_TERM.store(entry_term as u32, Ordering::SeqCst);
-                        next_index = index.saturating_add(1);
-
-                        tracing::debug!(
-                            bytes = b,
-                            index = index,
-                            term = entry_term,
-                            "Wrote Put operation to log"
-                        );
-                    }
-                },
-                LogWriterMsg::Truncate { last_index } => {
+                LogMessage::Truncate { last_index } => {
                     if let Err(e) = log_w.curr_log_file.flush() {
                         tracing::error!(error = ?e, "Failed to flush log file before truncation");
                     }
@@ -253,7 +199,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
                         "Truncated log"
                     );
                 }
-                LogWriterMsg::NodeMeta(current_term, voted_for) => {
+                LogMessage::NodeMeta(current_term, voted_for) => {
                     let meta = NodeMeta {
                         current_term,
                         voted_for,
@@ -281,7 +227,7 @@ pub fn init_log_writer(curr_term: Term, mut rx: mpsc::Receiver<LogWriterMsg>) ->
 
                     tracing::debug!(bytes = b, "Wrote node metadata to meta file");
                 }
-                LogWriterMsg::ShutDown => break,
+                LogMessage::ShutDown => break,
             }
         }
 
@@ -559,13 +505,12 @@ pub fn get_last_log_meta() -> (LastTerm, LastIdx) {
     (last_term, last_idx)
 }
 
-pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogWriterMsg>) -> Result<()> {
+pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<()> {
     if get_last_log_index() == 0 && get_entry_term(0).is_none() {
         lw_tx
-            .send(LogWriterMsg::AppendEntry {
+            .send(LogMessage::Append {
                 op: Op::Put("__dee_kv_meta__".to_string(), "sentinel".to_string().into()),
-                term: 1,
-                index: 0,
+                meta: Some((1, 0)), // (term, idx)
             })
             .await
             .with_context(|| "Failed to append sentinel log entry")?;

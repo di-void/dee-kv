@@ -1,5 +1,5 @@
 use dee_kv::{
-    ConsensusMessage, LogWriterMsg,
+    ConsensusMessage, LogMessage,
     cluster::consensus_apply::{ApplyMsg, run_apply_worker},
     cluster::{self, CurrentNode, consensus},
     log, server,
@@ -36,7 +36,7 @@ fn main() -> anyhow::Result<()> {
         use tokio::sync::RwLock;
 
         let rt = rt_handle.clone();
-        let (lw_tx, lw_rx) = mpsc::channel::<LogWriterMsg>(5);
+        let (lw_tx, lw_rx) = mpsc::channel::<LogMessage>(5);
         let (apply_tx, apply_rx) = mpsc::channel::<ApplyMsg>(8);
         let (shd_tx, shd_rx) = watch::channel::<Option<()>>(None);
         let (csus_tx, csus_rx) = watch::channel(ConsensusMessage::Init);

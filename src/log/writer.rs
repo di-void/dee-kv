@@ -69,6 +69,26 @@ pub struct LogWriter {
     pub(crate) data_dir_path: PathBuf,
 }
 
+struct LogCache {
+    buf: Vec<u8>,
+}
+
+pub struct Log {
+    cache: LogCache,
+    meta_buf: MetaBuffer,
+    curr_log_file: BufWriter<File>,
+    data_dir: PathBuf,
+}
+
+impl Log {
+    pub fn append(&mut self, payload: &[u8], should_check: bool) {}
+    pub fn write_meta(&mut self, payload: &[u8]) {}
+    pub fn get_entry(idx: u32) {}
+    pub fn get_entries_from(idx: u32, max: u16) {}
+    pub fn get_first_index_of_term(term: u32) {}
+    pub fn with_data_dir(dir_path: &str) {}
+}
+
 impl LogWriter {
     pub fn append_log(&mut self, payload: &[u8], should_check: bool) -> Result<usize> {
         if should_check {
