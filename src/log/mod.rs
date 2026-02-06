@@ -214,21 +214,22 @@ pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<(
     Ok(())
 }
 
-pub fn load_or_init(path: &str) -> Result<Vec<LogEntry>> {
-    let mut logs = Vec::new();
-    let path = Path::new(path);
+pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<LogEntry>)> {
+    let mut logs_map = HashMap::new();
+    let data_dir_path = Path::new(data_dir);
     tracing::info!("Loading log..");
-    let files = get_log_files(path)?;
+    let files = get_log_files(data_dir_path)?;
+    let files_len = files.len();
     tracing::debug!(file_count = files.len(), "Replaying log files");
 
-    if files.len() == 0 {
+    if files_len == 0 {
         tracing::info!("No log files found. Initializing log..");
         // init log file and insert sentinel entry
         let fname = generate_file_name();
-        let mut file = open_or_create_file(&fname, path).with_context(|| {
+        let mut file = open_or_create_file(&fname, data_dir_path).with_context(|| {
             format!(
                 "Failed to create new file at: {:?}/{:?}",
-                path.to_str().unwrap(),
+                data_dir_path.to_str().unwrap(),
                 fname
             )
         })?;
@@ -250,19 +251,23 @@ pub fn load_or_init(path: &str) -> Result<Vec<LogEntry>> {
             .write_all(payload.as_bytes())
             .with_context(|| format!("Failed to append sentinel log entry"));
 
-        logs.push(entry);
+        return Ok((logs_map, vec![entry]));
     }
 
     let mut buf = Vec::new();
+    let mut buf_ref = None;
 
-    for file in files {
-        replay_log_file(file.clone(), &mut buf)?;
-        logs.extend_from_slice(&buf);
-        buf.clear();
+    for (i, file) in files.into_iter().enumerate() {
+        let turn = i + 1;
+        if turn != files_len {
+            buf_ref = Some(&mut buf);
+        }
+
+        replay_log_file(file.clone(), &mut logs_map, &mut buf_ref)?;
         tracing::debug!(file_path = ?file, "Replayed log file");
     }
 
-    Ok(logs)
+    Ok((logs_map, buf))
 }
 
 // Atomics to hold last-known log index and term for fast, lock-free reads

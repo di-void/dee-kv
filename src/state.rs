@@ -1,7 +1,4 @@
-use crate::{
-    log,
-    serde::{LogEntry, Payload},
-};
+use crate::serde::{LogEntry, Payload};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -16,10 +13,8 @@ pub struct Store {
 }
 
 impl Store {
-    pub fn from_logs(logs: &Vec<LogEntry>) -> Self {
-        Self {
-            inner: log::rebuild_map(logs),
-        }
+    pub fn from_state(state: HashMap<String, Types>) -> Self {
+        Self { inner: state }
     }
 
     pub fn get(&self, k: &str) -> Option<Types> {

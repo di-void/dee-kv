@@ -1,13 +1,17 @@
 use anyhow::{Context, Result};
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs::{File, Metadata, OpenOptions, create_dir_all, read_dir},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
-use crate::serde::{CustomSerialize, LogEntry, deserialize_entry};
 use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, LogTerm, MAX_LOG_FILE_SIZE};
+use crate::{
+    serde::{CustomSerialize, LogEntry, deserialize_entry},
+    state::Types,
+};
 
 pub fn generate_file_name() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -102,7 +106,11 @@ pub fn check_file_delta(file_size: u64) -> u8 {
     p as u8
 }
 
-pub fn replay_log_file(file: LogFile, buf: &mut Vec<LogEntry>) -> Result<()> {
+pub fn replay_log_file(
+    file: LogFile,
+    logs_map: &mut HashMap<String, Types>,
+    buf: &mut Option<&mut Vec<LogEntry>>,
+) -> Result<()> {
     let file = open_file(&file.file_path)?;
     let file = BufReader::new(file);
 
@@ -125,7 +133,19 @@ pub fn replay_log_file(file: LogFile, buf: &mut Vec<LogEntry>) -> Result<()> {
             return;
         }
 
-        buf.push(log);
+        use crate::serde::Payload;
+        match log.payload {
+            Payload::Put { ref key, ref value } => {
+                logs_map.insert(key.clone(), value.clone().into());
+            }
+            Payload::Delete { ref key } => {
+                logs_map.remove(key);
+            }
+        }
+
+        if buf.is_some() {
+            buf.take().unwrap().push(log);
+        }
     });
 
     Ok(())
