@@ -1,12 +1,12 @@
 use crate::{
     ConsensusMessage, LogMessage, Op,
-    cluster::CurrentNode,
-    cluster::consensus_apply::ApplyMsg,
+    cluster::{CurrentNode, consensus_apply::ApplyMsg},
     consensus_proto::{
         AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
         RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
+    log::cache::LogCache,
     services::GrpcClientWrapper,
 };
 
@@ -17,6 +17,7 @@ use tonic::{Request, Response, Status, transport::Channel};
 #[derive(Clone)]
 pub struct ConsensusService {
     current_node: Arc<RwLock<CurrentNode>>,
+    logs_cache: Arc<RwLock<LogCache>>,
     lw_tx: mpsc::Sender<LogMessage>,
     csus_tx: watch::Sender<ConsensusMessage>,
     apply_tx: mpsc::Sender<ApplyMsg>,
@@ -25,12 +26,14 @@ pub struct ConsensusService {
 impl ConsensusService {
     pub fn with_state(
         current_node: Arc<RwLock<CurrentNode>>,
+        logs_cache: Arc<RwLock<LogCache>>,
         lw_tx: mpsc::Sender<LogMessage>,
         csus_tx: watch::Sender<ConsensusMessage>,
         apply_tx: mpsc::Sender<ApplyMsg>,
     ) -> Self {
         Self {
             current_node,
+            logs_cache,
             lw_tx,
             csus_tx,
             apply_tx,
@@ -208,14 +211,15 @@ impl ConsensusSvc for ConsensusService {
         }
 
         if prev_log_idx > 0 {
-            match crate::log::get_entry_term(prev_log_idx) {
-                Some(entry_term) if (entry_term as u32) != prev_log_term => {
+            let cache = self.logs_cache.read().await;
+            match cache.get_entry(prev_log_idx).await {
+                Some(entry) if (entry.term as u32) != prev_log_term => {
                     let conflict_index =
-                        crate::log::find_first_index_of_term(entry_term).unwrap_or(prev_log_idx);
+                        crate::log::find_first_index_of_term(entry.term).unwrap_or(prev_log_idx);
                     return Ok(Response::new(AppendEntriesResponse {
                         term: local_term.into(),
                         success: false,
-                        conflict_term: Some(entry_term as u32),
+                        conflict_term: Some(entry.term as u32),
                         conflict_index,
                     }));
                 }

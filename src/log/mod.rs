@@ -1,9 +1,9 @@
-mod cache;
+pub mod cache;
 mod file;
 pub mod writer;
 
 use crate::{
-    DATA_DIR, LOG_FILE_DELIM, LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, LogIndex, LogMessage,
+    DATA_DIR, LOG_FILE_DELIM, LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_SIZE, LogIndex, LogMessage,
     LogTerm, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES, META_FILE_PATH, Op,
     log::file::{
         CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
@@ -83,7 +83,7 @@ impl Log {
         if should_check {
             let meta = self.curr_log_file.get_ref().metadata()?;
             if let CheckStatus::Over(fh) =
-                check_file_size_or_create(get_file_size(&meta), LOG_FILE_MAX_DELTA, &self.data_dir)?
+                check_file_size_or_create(get_file_size(&meta), LOG_FILE_MAX_SIZE, &self.data_dir)?
             {
                 self.curr_log_file = BufWriter::new(fh);
             };
@@ -132,7 +132,7 @@ impl Log {
             let latest = &files[files.len() - 1];
             let res = check_file_size_or_create(
                 get_file_size(&latest.meta),
-                LOG_FILE_MAX_DELTA,
+                LOG_FILE_MAX_SIZE,
                 data_dir_path,
             )?;
             match res {
@@ -214,7 +214,7 @@ pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<(
     Ok(())
 }
 
-pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<LogEntry>)> {
+pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<(LogEntry, usize)>)> {
     let mut logs_map = HashMap::new();
     let data_dir_path = Path::new(data_dir);
     tracing::info!("Loading log..");
@@ -247,11 +247,12 @@ pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<LogEn
             .serialize()
             .with_context(|| format!("Failed to serialize sentinel log entry"))?;
 
+        let bytes = payload.as_bytes();
         let _ = file
-            .write_all(payload.as_bytes())
+            .write_all(bytes)
             .with_context(|| format!("Failed to append sentinel log entry"));
 
-        return Ok((logs_map, vec![entry]));
+        return Ok((logs_map, vec![(entry, bytes.len())]));
     }
 
     let mut buf = Vec::new();
@@ -507,13 +508,13 @@ pub fn get_last_log_meta_from_disk() -> (LogTerm, LogIndex) {
     (last_term, last_idx)
 }
 
-pub fn get_last_log_meta(log: &Vec<LogEntry>) -> (LogTerm, LogIndex) {
+pub fn get_last_log_meta(log: &Vec<(LogEntry, usize)>) -> (LogTerm, LogIndex) {
     let mut last_term: LogTerm = 1;
     let mut last_index: LogIndex = 0;
 
     if let Some(e) = log.last() {
-        last_term = e.term;
-        last_index = e.index;
+        last_term = e.0.term;
+        last_index = e.0.index;
     };
 
     (last_term, last_index)

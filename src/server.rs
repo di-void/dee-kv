@@ -7,6 +7,7 @@ use tokio::{
 use crate::{
     ConsensusMessage, LogMessage,
     cluster::{CurrentNode, consensus_apply::ApplyMsg},
+    log::cache::LogCache,
     state::Store,
 };
 use crate::{
@@ -20,6 +21,7 @@ pub async fn start(
     addr: std::net::SocketAddr,
     current_node: Arc<RwLock<CurrentNode>>,
     store: Arc<RwLock<Store>>,
+    logs_cache: Arc<RwLock<LogCache>>,
     lw_tx: mpsc::Sender<LogMessage>,
     apply_tx: mpsc::Sender<ApplyMsg>,
     sd_tx: watch::Sender<Option<()>>,
@@ -32,6 +34,7 @@ pub async fn start(
         let health_svc = HealthCheckService::default();
         let consensus_svc = ConsensusService::with_state(
             Arc::clone(&current_node),
+            logs_cache,
             lw_tx.clone(),
             csus_tx.clone(),
             apply_tx.clone(),

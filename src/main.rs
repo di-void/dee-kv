@@ -48,7 +48,10 @@ fn main() -> anyhow::Result<()> {
         let (disk_term, disk_last_idx) = log::get_last_log_meta(&logs);
         log::init_last_log_meta(disk_term, disk_last_idx);
 
-        let lw_handle = log::writer::init_log_writer(current_node.term, lw_rx);
+        let logs_cache = log::cache::LogCache::from_last_logs(logs);
+        let logs_cache = Arc::new(RwLock::new(logs_cache));
+        let lw_handle =
+            log::writer::init_log_writer(current_node.term, lw_rx, Arc::clone(&logs_cache));
         let current_node = Arc::new(RwLock::new(current_node));
         let store = Arc::new(RwLock::new(Store::from_state(state)));
 
@@ -70,6 +73,7 @@ fn main() -> anyhow::Result<()> {
             cluster.self_address.clone(),
             Arc::clone(&current_node),
             Arc::clone(&store),
+            Arc::clone(&logs_cache),
             lw_tx.clone(),
             apply_tx.clone(),
             shd_tx.clone(),

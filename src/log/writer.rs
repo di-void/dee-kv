@@ -1,16 +1,16 @@
 use crate::{
     DATA_DIR, LOG_FILE_CHECK_TIMEOUT, LogIndex, LogMessage, LogTerm, Op,
-    log::{LAST_LOG_INDEX, LAST_LOG_TERM, file::truncate_logs},
+    log::{LAST_LOG_INDEX, LAST_LOG_TERM, cache::LogCache, file::truncate_logs},
     serde::{CustomSerialize, LogEntry, NodeMeta, Payload},
 };
 use anyhow::Context;
 use std::{
     io::Write,
-    sync::atomic::Ordering,
+    sync::{Arc, atomic::Ordering},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{RwLock, mpsc};
 
 /// Starts a dedicated thread that serializes and persists log entries and node metadata.
 ///
@@ -39,7 +39,11 @@ use tokio::sync::mpsc;
 /// let _ = tokio::spawn(async move { let _ = tx.send(LogWriterMsg::ShutDown).await; });
 /// handle.join().unwrap();
 /// ```
-pub fn init_log_writer(curr_term: LogTerm, mut rx: mpsc::Receiver<LogMessage>) -> JoinHandle<()> {
+pub fn init_log_writer(
+    curr_term: LogTerm,
+    mut rx: mpsc::Receiver<LogMessage>,
+    log_cache: Arc<RwLock<LogCache>>,
+) -> JoinHandle<()> {
     use super::Log;
 
     let handle = thread::spawn(move || {
@@ -98,10 +102,13 @@ pub fn init_log_writer(curr_term: LogTerm, mut rx: mpsc::Receiver<LogMessage>) -
                             })
                             .unwrap();
 
+                        let mut guard = log_cache.blocking_write();
                         let b = log
                             .append(payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
+                        guard.push(log_entry, payload.as_bytes().len());
+                        drop(guard);
 
                         check_delta = false;
 
@@ -142,10 +149,13 @@ pub fn init_log_writer(curr_term: LogTerm, mut rx: mpsc::Receiver<LogMessage>) -
                             })
                             .unwrap();
 
+                        let mut guard = log_cache.blocking_write();
                         let b = log
                             .append(payload.as_bytes(), check_delta)
                             .with_context(|| format!("Failed to append to log file"))
                             .unwrap();
+                        guard.push(log_entry, payload.as_bytes().len());
+                        drop(guard);
 
                         check_delta = false;
 

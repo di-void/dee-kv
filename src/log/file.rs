@@ -7,7 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, LogTerm, MAX_LOG_FILE_SIZE};
+use crate::{
+    DATA_DIR, LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, LogTerm,
+};
 use crate::{
     serde::{CustomSerialize, LogEntry, deserialize_entry},
     state::Types,
@@ -101,15 +103,15 @@ pub fn get_log_files(path: &Path) -> Result<Vec<LogFile>> {
     Ok(entries)
 }
 
-pub fn check_file_delta(file_size: u64) -> u8 {
-    let p = file_size / MAX_LOG_FILE_SIZE * 100;
+pub fn check_file_delta(file_size: u64, max_size: u64) -> u8 {
+    let p = file_size / max_size * 100;
     p as u8
 }
 
 pub fn replay_log_file(
     file: LogFile,
     logs_map: &mut HashMap<String, Types>,
-    buf: &mut Option<&mut Vec<LogEntry>>,
+    buf: &mut Option<&mut Vec<(LogEntry, usize)>>,
 ) -> Result<()> {
     let file = open_file(&file.file_path)?;
     let file = BufReader::new(file);
@@ -144,7 +146,7 @@ pub fn replay_log_file(
         }
 
         if buf.is_some() {
-            buf.take().unwrap().push(log);
+            buf.take().unwrap().push((log, bytes.len()));
         }
     });
 
@@ -213,16 +215,53 @@ pub fn truncate_logs(
     Ok((writer, last_term, last_idx, old_paths))
 }
 
+pub fn get_entry_from_disk(index: u32, skip: Option<u8>) -> Option<LogEntry> {
+    let mut files = get_log_files(Path::new(DATA_DIR)).ok()?;
+    files.reverse(); // to search from the
+
+    let delim = LOG_FILE_DELIM.as_bytes()[0];
+    let skip_n = skip.or(Some(0)).unwrap();
+    let files_iter = files.into_iter().skip(skip_n.into());
+
+    for file in files_iter {
+        let fh = open_file(&file.file_path).ok()?;
+        let reader = BufReader::new(fh);
+
+        for record in reader.split(delim) {
+            let bytes = match record {
+                Ok(bytes) => bytes,
+                Err(_) => continue,
+            };
+            if bytes.is_empty() {
+                continue;
+            }
+            let log = match deserialize_entry::<LogEntry>(&bytes) {
+                Ok(log) => log,
+                Err(_) => continue,
+            };
+
+            if log.index == index {
+                return Some(log);
+            }
+            if log.index > index {
+                return None;
+            }
+        }
+    }
+
+    None
+}
+
 pub enum CheckStatus {
     Good,
     Over(File),
 }
 pub fn check_file_size_or_create(
     file_size: u64,
-    threshold: u8,
+    max: u64,
     parent_path: &Path,
 ) -> Result<CheckStatus> {
-    if check_file_delta(file_size) >= threshold {
+    if check_file_delta(file_size, max) >= LOG_FILE_MAX_DELTA {
         let fname = generate_file_name();
         let fh = open_or_create_file(&fname, parent_path).with_context(|| {
             format!(
