@@ -1,13 +1,13 @@
 use crate::{
-    DATA_DIR,
+    log,
     serde::{LogEntry, Payload},
 };
-use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum Types {
+    #[serde(untagged)]
     String(String),
 }
 
@@ -15,17 +15,13 @@ pub struct Store {
     inner: HashMap<String, Types>,
 }
 
-impl Default for Store {
-    fn default() -> Self {
+impl Store {
+    pub fn from_logs(logs: &Vec<LogEntry>) -> Self {
         Self {
-            inner: crate::log::rebuild(Path::new(DATA_DIR))
-                .with_context(|| format!("Error occurred while loading store"))
-                .unwrap(),
+            inner: log::rebuild_map(logs),
         }
     }
-}
 
-impl Store {
     pub fn get(&self, k: &str) -> Option<Types> {
         self.inner.get(k).map(|v| v.to_owned())
     }

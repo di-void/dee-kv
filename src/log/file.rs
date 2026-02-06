@@ -1,14 +1,12 @@
 use anyhow::{Context, Result};
 use std::{
-    collections::HashMap,
     ffi::OsStr,
     fs::{File, Metadata, OpenOptions, create_dir_all, read_dir},
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
 };
 
-use crate::serde::{CustomSerialize, LogEntry, Payload, deserialize_entry};
-use crate::state::Types;
+use crate::serde::{CustomSerialize, LogEntry, deserialize_entry};
 use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_FLUSH_LIMIT, LogTerm, MAX_LOG_FILE_SIZE};
 
 pub fn generate_file_name() -> String {
@@ -104,7 +102,7 @@ pub fn check_file_delta(file_size: u64) -> u8 {
     p as u8
 }
 
-pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Result<()> {
+pub fn replay_log_file(file: LogFile, buf: &mut Vec<LogEntry>) -> Result<()> {
     let file = open_file(&file.file_path)?;
     let file = BufReader::new(file);
 
@@ -127,14 +125,7 @@ pub fn replay_log_file(file: LogFile, hash: &mut HashMap<String, Types>) -> Resu
             return;
         }
 
-        match log.payload {
-            Payload::Put { key, value } => {
-                hash.insert(key, value.into());
-            }
-            Payload::Delete { key } => {
-                hash.remove(&key);
-            }
-        }
+        buf.push(log);
     });
 
     Ok(())

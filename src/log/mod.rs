@@ -2,29 +2,26 @@ mod cache;
 mod file;
 pub mod writer;
 
-use crate::serde::{LogEntry, deserialize_entry};
-use crate::state::Types;
-use crate::{DATA_DIR, LOG_FILE_DELIM, LogIndex, LogMessage, LogTerm, Op};
-use anyhow::{Context, Result};
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader};
-use std::sync::atomic::{AtomicU32, Ordering};
-use tokio::sync::mpsc;
-
 use crate::{
-    LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES,
-    META_FILE_PATH,
+    DATA_DIR, LOG_FILE_DELIM, LOG_FILE_FLUSH_LIMIT, LOG_FILE_MAX_DELTA, LogIndex, LogMessage,
+    LogTerm, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES, META_FILE_PATH, Op,
     log::file::{
         CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
         open_file, open_or_create_file, replay_log_file, validate_or_create_dir,
     },
+    serde::{CustomSerialize, LogEntry, Payload, deserialize_entry},
+    state::Types,
     utils::file as file_utils,
 };
+use anyhow::{Context, Result};
 use std::{
+    collections::HashMap,
     fs::File,
-    io::{BufWriter, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU32, Ordering},
 };
+use tokio::sync::mpsc;
 
 /// A buffer for meta writes that overwrites its contents on each write,
 /// grows dynamically as needed, and periodically flushes to disk by overwriting the file.
@@ -84,12 +81,10 @@ pub struct Log {
 impl Log {
     pub fn append(&mut self, payload: &[u8], should_check: bool) -> Result<usize> {
         if should_check {
-            let f_meta = self.curr_log_file.get_ref().metadata()?;
-            if let CheckStatus::Over(fh) = check_file_size_or_create(
-                get_file_size(&f_meta),
-                LOG_FILE_MAX_DELTA,
-                &self.data_dir,
-            )? {
+            let meta = self.curr_log_file.get_ref().metadata()?;
+            if let CheckStatus::Over(fh) =
+                check_file_size_or_create(get_file_size(&meta), LOG_FILE_MAX_DELTA, &self.data_dir)?
+            {
                 self.curr_log_file = BufWriter::new(fh);
             };
         }
@@ -189,17 +184,85 @@ impl Drop for Log {
 /// let store = crate::log::rebuild(Path::new("./data")).unwrap();
 /// assert!(store.is_empty() || store.len() >= 0);
 /// ```
-pub fn rebuild(path: &Path) -> Result<HashMap<String, Types>> {
+pub fn rebuild_map(logs: &Vec<LogEntry>) -> HashMap<String, Types> {
     let mut hash: HashMap<String, Types> = HashMap::new();
-    tracing::info!("Rebuilding store from log files");
+    tracing::info!("Rebuilding map from logs");
+
+    for log in logs.iter() {
+        use crate::serde::Payload;
+
+        match log.payload {
+            Payload::Put { ref key, ref value } => hash.insert(key.clone(), value.clone().into()),
+            Payload::Delete { ref key } => hash.remove(key),
+        };
+    }
+
+    hash
+}
+
+pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<()> {
+    if get_last_log_index() == 0 && get_entry_term(0).is_none() {
+        lw_tx
+            .send(LogMessage::Append {
+                op: Op::Put("__dee_kv_meta__".to_string(), "sentinel".to_string().into()),
+                meta: Some((1, 0)), // (term, idx)
+            })
+            .await
+            .with_context(|| "Failed to append sentinel log entry")?;
+    }
+
+    Ok(())
+}
+
+pub fn load_or_init(path: &str) -> Result<Vec<LogEntry>> {
+    let mut logs = Vec::new();
+    let path = Path::new(path);
+    tracing::info!("Loading log..");
     let files = get_log_files(path)?;
     tracing::debug!(file_count = files.len(), "Replaying log files");
+
+    if files.len() == 0 {
+        tracing::info!("No log files found. Initializing log..");
+        // init log file and insert sentinel entry
+        let fname = generate_file_name();
+        let mut file = open_or_create_file(&fname, path).with_context(|| {
+            format!(
+                "Failed to create new file at: {:?}/{:?}",
+                path.to_str().unwrap(),
+                fname
+            )
+        })?;
+
+        let entry = LogEntry::with_index(
+            Payload::Put {
+                key: String::from("__dee_kv_meta__"),
+                value: String::from("sentinel").into(),
+            },
+            1,
+            0,
+        );
+
+        let payload = entry
+            .serialize()
+            .with_context(|| format!("Failed to serialize sentinel log entry"))?;
+
+        let _ = file
+            .write_all(payload.as_bytes())
+            .with_context(|| format!("Failed to append sentinel log entry"));
+
+        logs.push(entry);
+    }
+
+    let mut buf = Vec::new();
+
     for file in files {
-        replay_log_file(file.clone(), &mut hash)?;
+        replay_log_file(file.clone(), &mut buf)?;
+        logs.extend_from_slice(&buf);
+        buf.clear();
         tracing::debug!(file_path = ?file, "Replayed log file");
     }
 
-    Ok(hash)
+    Ok(logs)
 }
 
 // Atomics to hold last-known log index and term for fast, lock-free reads
@@ -363,10 +426,10 @@ pub fn init_last_log_meta(term: LogTerm, idx: LogIndex) {
 /// # Examples
 ///
 /// ```
-/// let (_term, _index) = crate::log::get_last_log_meta();
+/// let (_term, _index) = crate::log::get_last_log_meta_from_disk();
 /// // Use the returned term and index as needed.
 /// ```
-pub fn get_last_log_meta() -> (LogTerm, LogIndex) {
+pub fn get_last_log_meta_from_disk() -> (LogTerm, LogIndex) {
     use crate::{LOG_FILE_DELIM, serde::deserialize_entry};
     use std::io::{Read, Seek, SeekFrom};
     use std::path::Path;
@@ -439,16 +502,14 @@ pub fn get_last_log_meta() -> (LogTerm, LogIndex) {
     (last_term, last_idx)
 }
 
-pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<()> {
-    if get_last_log_index() == 0 && get_entry_term(0).is_none() {
-        lw_tx
-            .send(LogMessage::Append {
-                op: Op::Put("__dee_kv_meta__".to_string(), "sentinel".to_string().into()),
-                meta: Some((1, 0)), // (term, idx)
-            })
-            .await
-            .with_context(|| "Failed to append sentinel log entry")?;
-    }
+pub fn get_last_log_meta(log: &Vec<LogEntry>) -> (LogTerm, LogIndex) {
+    let mut last_term: LogTerm = 1;
+    let mut last_index: LogIndex = 0;
 
-    Ok(())
+    if let Some(e) = log.last() {
+        last_term = e.term;
+        last_index = e.index;
+    };
+
+    (last_term, last_index)
 }

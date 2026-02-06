@@ -390,7 +390,7 @@ fn build_append_entries(entries: Vec<crate::serde::LogEntry>) -> Vec<Entry> {
                 Payload::Put { key, value } => {
                     let mut payload = std::collections::HashMap::new();
                     payload.insert("key".to_string(), key);
-                    payload.insert("value".to_string(), value);
+                    payload.insert("value".to_string(), value.into());
                     (Command::Put, payload)
                 }
                 Payload::Delete { key } => {

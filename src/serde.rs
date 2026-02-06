@@ -1,19 +1,19 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Result;
 
-use crate::{LOG_FILE_DELIM, LogIndex, LogTerm};
+use crate::{LOG_FILE_DELIM, LogIndex, LogTerm, state::Types};
 
 pub trait CustomSerialize {
     fn serialize(&self) -> Result<String>;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub enum Payload {
-    Put { key: String, value: String },
+    Put { key: String, value: Types },
     Delete { key: String },
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct LogEntry {
     pub payload: Payload,
     pub term: LogTerm,
