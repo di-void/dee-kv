@@ -44,6 +44,7 @@ impl StoreSvc for StoreService {
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
+        // NOTE: Only leader node accepts this request
         let msg = request.into_inner();
         let kv = (msg.key, msg.value);
 
@@ -65,6 +66,7 @@ impl StoreSvc for StoreService {
         &self,
         request: Request<KeyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
+        // NOTE: Only leader node accepts this request
         let msg = request.into_inner();
         let key = msg.key;
 

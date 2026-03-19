@@ -31,15 +31,15 @@ fn main() -> anyhow::Result<()> {
     let env_vars = env::get_env_vars();
     let cluster = cluster::config::parse_cluster_config(args, env_vars)?;
     let current_node = CurrentNode::from_meta(cluster.self_id)?;
-    let (state, last_logs) = log::load_or_init(DATA_DIR)?;
+    let (state, logs) = log::load_or_init(DATA_DIR)?;
     let rt_handle = rt.handle();
 
     rt.block_on(async move {
         use std::sync::Arc;
         use tokio::sync::RwLock;
 
+        let logs = logs;
         let rt = rt_handle.clone();
-        let logs = last_logs;
         let (lw_tx, lw_rx) = mpsc::channel::<LogMessage>(5);
         let (apply_tx, apply_rx) = mpsc::channel::<ApplyMsg>(8);
         let (shd_tx, shd_rx) = watch::channel::<Option<()>>(None);

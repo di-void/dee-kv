@@ -1,5 +1,5 @@
 pub mod cache;
-mod file;
+pub mod file;
 pub mod writer;
 
 use crate::{
@@ -259,8 +259,8 @@ pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<(LogE
     let mut buf_ref = None;
 
     for (i, file) in files.into_iter().enumerate() {
-        let turn = i + 1;
-        if turn != files_len {
+        if i == files_len.saturating_sub(2) || i == files_len.saturating_sub(1) {
+            // last 2 log files
             buf_ref = Some(&mut buf);
         }
 
@@ -329,7 +329,7 @@ pub fn get_entry_term(index: u32) -> Option<LogTerm> {
     None
 }
 
-pub fn find_first_index_of_term(term: LogTerm) -> Option<u32> {
+pub fn find_first_index_of_term(term: LogTerm, _skip_n_pages: u8) -> Option<u32> {
     let files = get_log_files(Path::new(DATA_DIR)).ok()?;
     let delim = LOG_FILE_DELIM.as_bytes()[0];
 

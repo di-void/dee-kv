@@ -215,15 +215,14 @@ pub fn truncate_logs(
     Ok((writer, last_term, last_idx, old_paths))
 }
 
-pub fn get_entry_from_disk(index: u32, skip: Option<u8>) -> Option<LogEntry> {
+pub fn get_entry_from_disk(index: u32, skip: u8) -> Option<(LogEntry, u8)> {
     let mut files = get_log_files(Path::new(DATA_DIR)).ok()?;
-    files.reverse(); // to search from the
+    files.reverse(); // to search from behind
 
     let delim = LOG_FILE_DELIM.as_bytes()[0];
-    let skip_n = skip.or(Some(0)).unwrap();
-    let files_iter = files.into_iter().skip(skip_n.into());
+    let files_iter = files.into_iter().skip(skip as usize);
 
-    for file in files_iter {
+    for (i, file) in files_iter.enumerate() {
         let fh = open_file(&file.file_path).ok()?;
         let reader = BufReader::new(fh);
 
@@ -241,7 +240,7 @@ pub fn get_entry_from_disk(index: u32, skip: Option<u8>) -> Option<LogEntry> {
             };
 
             if log.index == index {
-                return Some(log);
+                return Some((log, (i + 1) as u8));
             }
             if log.index > index {
                 return None;

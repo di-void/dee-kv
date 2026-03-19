@@ -321,6 +321,7 @@ async fn run_leader_heartbeats(
                             let next_index = match resp.conflict_term {
                                 Some(conflict_term) => crate::log::find_first_index_of_term(
                                     conflict_term as crate::LogTerm,
+                                    0,
                                 )
                                 .unwrap_or(resp.conflict_index),
                                 None => resp.conflict_index,

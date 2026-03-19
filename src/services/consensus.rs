@@ -6,7 +6,8 @@ use crate::{
         RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
-    log::cache::LogCache,
+    log::{self, cache::LogCache},
+    serde::LogEntry,
     services::GrpcClientWrapper,
 };
 
@@ -200,7 +201,7 @@ impl ConsensusSvc for ConsensusService {
                 .await;
         }
 
-        let local_last_index = crate::log::get_last_log_index();
+        let local_last_index = crate::log::get_last_log_index(); // get last log index
         if prev_log_idx > local_last_index {
             return Ok(Response::new(AppendEntriesResponse {
                 term: local_term.into(),
@@ -212,10 +213,42 @@ impl ConsensusSvc for ConsensusService {
 
         if prev_log_idx > 0 {
             let cache = self.logs_cache.read().await;
-            match cache.get_entry(prev_log_idx).await {
+            let mut log_entry: Option<LogEntry> = None;
+            let mut cache_entry_idx: usize = 0;
+            let mut disk_entry_page: u8 = 0; // PERF: initialize with last cache page
+
+            {
+                if let Some((entry, i)) = cache.get_entry(prev_log_idx).await {
+                    log_entry = Some(entry);
+                    cache_entry_idx = i;
+                };
+                drop(cache);
+            }
+
+            if log_entry.is_none() {
+                if let Some((entry, page)) = log::file::get_entry_from_disk(prev_log_idx, 0) {
+                    log_entry = Some(entry);
+                    disk_entry_page = page;
+                }; // PERF: skip cached files
+            }
+
+            match log_entry {
                 Some(entry) if (entry.term as u32) != prev_log_term => {
-                    let conflict_index =
-                        crate::log::find_first_index_of_term(entry.term).unwrap_or(prev_log_idx);
+                    let cache = self.logs_cache.read().await;
+                    // find entry in cache
+                    let conflict_index: u32;
+                    let cache_idx = cache
+                        .get_first_index_of_term(entry.term, cache_entry_idx)
+                        .await;
+
+                    if cache_idx.is_some() {
+                        conflict_index = cache_idx.unwrap();
+                    } else {
+                        // check disk
+                        conflict_index = log::find_first_index_of_term(entry.term, disk_entry_page)
+                            .unwrap_or(prev_log_idx);
+                    }
+
                     return Ok(Response::new(AppendEntriesResponse {
                         term: local_term.into(),
                         success: false,

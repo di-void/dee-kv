@@ -1,10 +1,10 @@
-use crate::{LogIndex, log::file::get_entry_from_disk, serde::LogEntry};
+use crate::{LogTerm, serde::LogEntry};
 
 // log cache
 pub struct LogCache {
     buf: Vec<LogEntry>,
     size: usize,
-    resize_offset: LogIndex,
+    _start_log_offset: u16,
 }
 
 impl LogCache {
@@ -21,7 +21,7 @@ impl LogCache {
         Self {
             buf,
             size,
-            resize_offset: 0,
+            _start_log_offset: 0,
         }
     }
 
@@ -30,23 +30,25 @@ impl LogCache {
         self.size += size
     }
 
-    async fn resize(&mut self) {}
+    async fn _rotate(&mut self) {
+        todo!("rotate")
+    }
 
-    pub async fn get_entry(&self, search_idx: u32) -> Option<LogEntry> {
-        match self
+    pub async fn get_entry(&self, search_idx: u32) -> Option<(LogEntry, usize)> {
+        if let Ok(i) = self
             .buf
             .binary_search_by(|entry| entry.index.cmp(&search_idx))
         {
-            Ok(i) => Some(self.buf.get(i).unwrap().to_owned()),
-            Err(_) => {
-                let res = tokio::task::spawn_blocking(move || {
-                    get_entry_from_disk(search_idx, None) // set the skip value to skip searching a number of log files
-                });
-
-                res.await.unwrap()
-            }
+            return Some((self.buf.get(i).unwrap().to_owned(), i));
         }
+        None
     }
-    pub async fn get_entries_from(&self, idx: u32, max: u16) {}
-    pub async fn get_first_index_of_term(&self, term: u32) {}
+
+    pub async fn get_entries_from(&self, _idx: u32, _max: u16) {
+        todo!("get entries from")
+    }
+
+    pub async fn get_first_index_of_term(&self, _term: LogTerm, _start_idx: usize) -> Option<u32> {
+        todo!("get first index");
+    }
 }
