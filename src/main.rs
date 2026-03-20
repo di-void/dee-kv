@@ -1,8 +1,8 @@
 use dee_kv::{
     ConsensusMessage, DATA_DIR, LogMessage,
     cluster::{
-        self, CurrentNode, consensus,
-        consensus_apply::{ApplyMsg, run_apply_worker},
+        self, ApplyMsg, CurrentNode,
+        consensus::{self, run_apply_worker},
     },
     log, server,
     state::Store,

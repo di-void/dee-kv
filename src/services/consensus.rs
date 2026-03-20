@@ -1,8 +1,8 @@
 use crate::{
     ConsensusMessage, LogMessage, Op,
-    cluster::{CurrentNode, consensus_apply::ApplyMsg},
+    cluster::{ApplyMsg, CurrentNode},
     consensus_proto::{
-        AppendEntriesRequest, AppendEntriesResponse, Command, RequestVoteRequest,
+        AppendEntriesRequest, AppendEntriesResponse, Command, Entry, RequestVoteRequest,
         RequestVoteResponse, consensus_service_client::ConsensusServiceClient,
         consensus_service_server::ConsensusService as ConsensusSvc,
     },
@@ -212,42 +212,30 @@ impl ConsensusSvc for ConsensusService {
         }
 
         if prev_log_idx > 0 {
-            let cache = self.logs_cache.read().await;
             let mut log_entry: Option<LogEntry> = None;
-            let mut cache_entry_idx: usize = 0;
+            let mut _cache_entry_idx: usize = 0;
             let mut disk_entry_page: u8 = 0; // PERF: initialize with last cache page
 
             {
+                let cache = self.logs_cache.read().await;
                 if let Some((entry, i)) = cache.get_entry(prev_log_idx).await {
                     log_entry = Some(entry);
-                    cache_entry_idx = i;
+                    _cache_entry_idx = i;
                 };
-                drop(cache);
             }
 
             if log_entry.is_none() {
-                if let Some((entry, page)) = log::file::get_entry_from_disk(prev_log_idx, 0) {
+                // PERF: skip cached files
+                if let Some((entry, page)) = log::get_entry_from_disk(prev_log_idx, 0) {
                     log_entry = Some(entry);
                     disk_entry_page = page;
-                }; // PERF: skip cached files
+                };
             }
 
             match log_entry {
                 Some(entry) if (entry.term as u32) != prev_log_term => {
-                    let cache = self.logs_cache.read().await;
-                    // find entry in cache
-                    let conflict_index: u32;
-                    let cache_idx = cache
-                        .get_first_index_of_term(entry.term, cache_entry_idx)
-                        .await;
-
-                    if cache_idx.is_some() {
-                        conflict_index = cache_idx.unwrap();
-                    } else {
-                        // check disk
-                        conflict_index = log::find_first_index_of_term(entry.term, disk_entry_page)
-                            .unwrap_or(prev_log_idx);
-                    }
+                    let conflict_index = log::find_first_index_of_term(entry.term, disk_entry_page)
+                        .unwrap_or(prev_log_idx);
 
                     return Ok(Response::new(AppendEntriesResponse {
                         term: local_term.into(),
@@ -268,23 +256,16 @@ impl ConsensusSvc for ConsensusService {
             }
         }
 
+        // heartbeat
         if entries.is_empty() {
-            // heartbeat
-            if leader_commit > 0 {
-                let local_last_index = crate::log::get_last_log_index();
-                let commit_index = leader_commit.min(local_last_index);
-                let mut node = self.current_node.write().await;
-                if commit_index > node.commit_index {
-                    node.commit_index = commit_index;
-                    drop(node);
-
-                    if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
-                        // apply committed entries
-                        tracing::error!(error = ?err, "Apply channel closed");
-                        return Err(Status::internal("apply worker unavailable"));
-                    };
-                }
-            }
+            let local_last_index = crate::log::get_last_log_index();
+            let _ = handle_leader_commit(
+                leader_commit,
+                local_last_index,
+                self.apply_tx.clone(),
+                Arc::clone(&self.current_node),
+            )
+            .await?;
 
             return Ok(Response::new(AppendEntriesResponse {
                 term: local_term.into(),
@@ -295,79 +276,15 @@ impl ConsensusSvc for ConsensusService {
         }
 
         let entries_len = entries.len() as u32;
+        let _ = handle_entries(entries, prev_log_idx, self.lw_tx.clone()).await?;
 
-        if let Err(err) = self
-            .lw_tx
-            .send(LogMessage::Truncate {
-                last_index: prev_log_idx,
-            })
-            .await
-        {
-            tracing::error!(error = ?err, "Log writer unavailable");
-            return Err(Status::internal("log writer unavailable"));
-        };
-
-        for entry in entries {
-            let command = entry.command();
-            let payload = &entry.payload;
-            let key = match payload.get("key") {
-                Some(k) => k.clone(),
-                None => {
-                    return Err(Status::invalid_argument("append_entries entry missing key"));
-                }
-            };
-
-            let op = match command {
-                Command::Put => {
-                    let value = match payload.get("value") {
-                        Some(v) => v.clone(),
-                        None => {
-                            return Err(Status::invalid_argument(
-                                "append_entries put missing value",
-                            ));
-                        }
-                    };
-                    Op::Put(key, value.into())
-                }
-                Command::Del => Op::Delete(key),
-                Command::Unspecified => {
-                    return Err(Status::invalid_argument(
-                        "append_entries command unspecified",
-                    ));
-                }
-            };
-
-            let entry_term = entry.term as crate::LogTerm;
-            let entry_index = entry.idx;
-
-            if let Err(err) = self
-                .lw_tx
-                .send(LogMessage::Append {
-                    op,
-                    meta: Some((entry_term, entry_index)),
-                })
-                .await
-            {
-                tracing::error!(error = ?err, "Log writer unavailable");
-                return Err(Status::internal("log writer unavailable"));
-            };
-        }
-
-        if leader_commit > 0 {
-            let new_last_index = prev_log_idx.saturating_add(entries_len);
-            let commit_index = leader_commit.min(new_last_index);
-            let mut node = self.current_node.write().await;
-            if commit_index > node.commit_index {
-                node.commit_index = commit_index;
-                drop(node);
-
-                if let Err(err) = self.apply_tx.send(ApplyMsg::Apply).await {
-                    // apply committed entries
-                    tracing::error!(error = ?err, "Apply channel closed");
-                    return Err(Status::internal("apply worker unavailable"));
-                };
-            }
-        }
+        let _ = handle_leader_commit(
+            leader_commit,
+            prev_log_idx.saturating_add(entries_len),
+            self.apply_tx.clone(),
+            Arc::clone(&self.current_node),
+        )
+        .await?;
 
         Ok(Response::new(AppendEntriesResponse {
             term: local_term.into(),
@@ -376,6 +293,91 @@ impl ConsensusSvc for ConsensusService {
             conflict_index: 0,
         }))
     }
+}
+
+async fn handle_leader_commit(
+    leader_commit: u32,
+    local_last_idx: u32,
+    apply_tx: mpsc::Sender<ApplyMsg>,
+    current_node: Arc<RwLock<CurrentNode>>,
+) -> Result<(), Status> {
+    if leader_commit > 0 {
+        let commit_index = leader_commit.min(local_last_idx);
+        let mut node = current_node.write().await;
+        if commit_index > node.commit_index {
+            node.commit_index = commit_index;
+            drop(node);
+
+            if let Err(err) = apply_tx.send(ApplyMsg::Apply).await {
+                // apply committed entries
+                tracing::error!(error = ?err, "Apply channel closed");
+                return Err(Status::internal("apply worker unavailable"));
+            };
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_entries(
+    entries: Vec<Entry>,
+    prev_log_idx: u32,
+    lw_tx: mpsc::Sender<LogMessage>,
+) -> Result<(), Status> {
+    if let Err(err) = lw_tx
+        .send(LogMessage::Truncate {
+            last_index: prev_log_idx,
+        })
+        .await
+    {
+        tracing::error!(error = ?err, "Log writer unavailable");
+        return Err(Status::internal("log writer unavailable"));
+    };
+
+    for entry in entries {
+        let command = entry.command();
+        let payload = &entry.payload;
+        let key = match payload.get("key") {
+            Some(k) => k.clone(),
+            None => {
+                return Err(Status::invalid_argument("append_entries entry missing key"));
+            }
+        };
+
+        let op = match command {
+            Command::Put => {
+                let value = match payload.get("value") {
+                    Some(v) => v.clone(),
+                    None => {
+                        return Err(Status::invalid_argument("append_entries put missing value"));
+                    }
+                };
+                Op::Put(key, value.into())
+            }
+            Command::Del => Op::Delete(key),
+            Command::Unspecified => {
+                return Err(Status::invalid_argument(
+                    "append_entries command unspecified",
+                ));
+            }
+        };
+
+        let entry_term = entry.term as crate::LogTerm;
+        let entry_index = entry.idx;
+
+        if let Err(err) = lw_tx
+            .send(LogMessage::Append {
+                op,
+                meta: Some((entry_term, entry_index)),
+            })
+            .await
+        {
+            tracing::error!(error = ?err, "Log writer unavailable");
+            return Err(Status::internal("log writer unavailable"));
+        };
+    }
+
+    Ok(())
 }
 
 impl GrpcClientWrapper for ConsensusServiceClient<Channel> {

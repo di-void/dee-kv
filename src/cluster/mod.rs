@@ -1,6 +1,5 @@
 pub mod config;
 pub mod consensus;
-pub mod consensus_apply;
 
 use serde::Deserialize;
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -34,6 +33,11 @@ pub struct Cluster {
 pub enum PeerStatus {
     Alive,
     Dead,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ApplyMsg {
+    Apply,
 }
 
 #[derive(Debug)]

@@ -1,6 +1,6 @@
 use crate::{
     DATA_DIR, LOG_FILE_CHECK_TIMEOUT, LogIndex, LogMessage, LogTerm, Op,
-    log::{LAST_LOG_INDEX, LAST_LOG_TERM, cache::LogCache, file::truncate_logs},
+    log::{LAST_LOG_INDEX, LAST_LOG_TERM, cache::LogCache, truncate_logs},
     serde::{CustomSerialize, LogEntry, NodeMeta, Payload},
 };
 use anyhow::Context;

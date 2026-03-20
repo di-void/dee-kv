@@ -6,7 +6,7 @@ use tokio::{
 
 use crate::{
     ConsensusMessage, LogMessage,
-    cluster::{CurrentNode, consensus_apply::ApplyMsg},
+    cluster::{ApplyMsg, CurrentNode},
     log::cache::LogCache,
     state::Store,
 };
@@ -30,7 +30,11 @@ pub async fn start(
     let handle = tokio::spawn(async move {
         tracing::info!(address = %addr, "Server is listening");
 
-        let store_svc = StoreService::with_log_writer(Arc::clone(&store), lw_tx.clone());
+        let store_svc = StoreService::with_log_writer(
+            Arc::clone(&store),
+            lw_tx.clone(),
+            Arc::clone(&current_node),
+        );
         let health_svc = HealthCheckService::default();
         let consensus_svc = ConsensusService::with_state(
             Arc::clone(&current_node),

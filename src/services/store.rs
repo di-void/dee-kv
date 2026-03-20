@@ -1,3 +1,4 @@
+use crate::cluster::CurrentNode;
 use crate::store_proto::{
     DeleteResponse, GetResponse, KeyRequest, PutRequest, PutResponse,
     store_service_server::StoreService as StoreSvc,
@@ -11,15 +12,21 @@ use tokio::sync::{RwLock, mpsc::Sender};
 use tonic::{Request, Response, Status};
 
 pub struct StoreService {
+    current_node: Arc<RwLock<CurrentNode>>,
     kv: Arc<RwLock<KV>>,
     log_writer: Sender<LogMessage>,
 }
 
 impl StoreService {
-    pub fn with_log_writer(store: Arc<RwLock<KV>>, tx: Sender<LogMessage>) -> Self {
+    pub fn with_log_writer(
+        store: Arc<RwLock<KV>>,
+        tx: Sender<LogMessage>,
+        current_node: Arc<RwLock<CurrentNode>>,
+    ) -> Self {
         Self {
             kv: store,
             log_writer: tx,
+            current_node,
         }
     }
 }
@@ -44,7 +51,13 @@ impl StoreSvc for StoreService {
     }
 
     async fn put(&self, request: Request<PutRequest>) -> Result<Response<PutResponse>, Status> {
-        // NOTE: Only leader node accepts this request
+        {
+            let node = self.current_node.read().await;
+            if !node.is_leader() {
+                return Err(Status::aborted("follower node"));
+            }
+        }
+
         let msg = request.into_inner();
         let kv = (msg.key, msg.value);
 
@@ -66,7 +79,13 @@ impl StoreSvc for StoreService {
         &self,
         request: Request<KeyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
-        // NOTE: Only leader node accepts this request
+        {
+            let node = self.current_node.read().await;
+            if !node.is_leader() {
+                return Err(Status::aborted("follower node"));
+            }
+        }
+
         let msg = request.into_inner();
         let key = msg.key;
 

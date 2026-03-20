@@ -39,8 +39,11 @@ impl LogCache {
             .buf
             .binary_search_by(|entry| entry.index.cmp(&search_idx))
         {
+            println!("[LOG CACHE] HIT!");
             return Some((self.buf.get(i).unwrap().to_owned(), i));
         }
+
+        println!("[LOG CACHE] MISS!");
         None
     }
 
