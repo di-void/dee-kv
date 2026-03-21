@@ -7,7 +7,7 @@ use crate::{
     LogTerm, META_BUF_CAPACITY, META_FILE_FLUSH_WRITES, META_FILE_PATH, Op,
     log::file::{
         CheckStatus, check_file_size_or_create, generate_file_name, get_file_size, get_log_files,
-        open_file, open_or_create_file, replay_log_file, validate_or_create_dir,
+        open_append_file, open_or_create_file, replay_log_file, validate_or_create_dir,
     },
     serde::{CustomSerialize, LogEntry, Payload, deserialize_entry},
     state::Types,
@@ -17,7 +17,7 @@ use anyhow::{Context, Result};
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     sync::atomic::{AtomicU32, Ordering},
 };
@@ -137,7 +137,7 @@ impl Log {
             )?;
             match res {
                 CheckStatus::Good => {
-                    let fh = open_file(&latest.file_path).with_context(|| {
+                    let fh = open_append_file(&latest.file_path).with_context(|| {
                         format!("Failed to open file at path: {:?}", &latest.file_path)
                     })?;
 
@@ -304,7 +304,7 @@ pub fn get_entry_from_disk(index: u32, skip: u8) -> Option<(LogEntry, u8)> {
     let files_iter = files.into_iter().skip(skip as usize);
 
     for (i, file) in files_iter.enumerate() {
-        let fh = open_file(&file.file_path).ok()?;
+        let fh = open_append_file(&file.file_path).ok()?;
         let reader = BufReader::new(fh);
 
         for record in reader.split(delim) {
@@ -337,7 +337,7 @@ pub fn get_entry_term(index: u32) -> Option<LogTerm> {
     let delim = LOG_FILE_DELIM.as_bytes()[0];
 
     for file in files {
-        let fh = open_file(&file.file_path).ok()?;
+        let fh = open_append_file(&file.file_path).ok()?;
         let reader = BufReader::new(fh);
 
         for record in reader.split(delim) {
@@ -370,7 +370,7 @@ pub fn find_first_index_of_term(term: LogTerm, _skip_n_pages: u8) -> Option<u32>
     let delim = LOG_FILE_DELIM.as_bytes()[0];
 
     for file in files {
-        let fh = open_file(&file.file_path).ok()?;
+        let fh = open_append_file(&file.file_path).ok()?;
         let reader = BufReader::new(fh);
 
         for record in reader.split(delim) {
@@ -409,7 +409,7 @@ pub fn get_entries_from(start_index: u32, max_entries: usize) -> Vec<LogEntry> {
     let mut entries = Vec::new();
 
     for file in files {
-        let fh = match open_file(&file.file_path) {
+        let fh = match open_append_file(&file.file_path) {
             Ok(fh) => fh,
             Err(_) => continue,
         };
@@ -493,7 +493,7 @@ pub fn get_last_log_meta_from_disk() -> (LogTerm, LogIndex) {
 
     // Try newest files first
     for file in files.iter().rev() {
-        if let Ok(mut fh) = file::open_file(&file.file_path) {
+        if let Ok(mut fh) = file::open_append_file(&file.file_path) {
             if let Ok(metadata) = fh.metadata() {
                 let mut remaining = metadata.len();
                 let mut acc: Vec<u8> = Vec::new();
@@ -559,61 +559,52 @@ pub fn get_last_log_meta(log: &Vec<(LogEntry, usize)>) -> (LogTerm, LogIndex) {
 pub fn truncate_logs(
     parent_path: &Path,
     last_index: u32,
-) -> Result<(BufWriter<File>, LogTerm, u32, Vec<PathBuf>)> {
-    let files = get_log_files(parent_path)?;
-    let mut entries: Vec<LogEntry> = Vec::new();
-    let mut done = false;
+) -> Result<(Option<BufWriter<File>>, LogTerm, LogIndex, Vec<PathBuf>)> {
+    use anyhow::Error;
+
+    let mut files = get_log_files(parent_path)?;
+    files.reverse();
+
+    let mut old_paths: Vec<PathBuf> = Vec::new();
+    let mut new_writer: Option<BufWriter<File>> = None;
+    let mut last_term: LogTerm = 1;
+    let mut last_idx: LogIndex = 0;
     let delim = LOG_FILE_DELIM.as_bytes()[0];
 
-    for file in &files {
-        let fh = open_file(&file.file_path)?;
-        let reader = BufReader::new(fh);
+    let mut buf = Vec::new(); // PERF: pre-allocate buffer with expected log file capacity; they should stay around the same size
+    'outer: for file in &files {
+        let mut fh = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&file.file_path)?;
 
-        for record in reader.split(delim) {
-            let bytes = record?;
+        let _ = fh.read_to_end(&mut buf)?;
+        let mut offset: usize = 0;
+
+        for bytes in buf.split(|byte| *byte == delim) {
             if bytes.is_empty() {
+                offset += 1;
                 continue;
             }
-            let log = deserialize_entry::<LogEntry>(&bytes)?;
-            if log.index <= last_index {
-                entries.push(log);
-            } else {
-                done = true;
-                break;
+
+            offset += bytes.len() + 1; // entry + delim
+            let log = deserialize_entry::<LogEntry>(bytes)?;
+            if log.index == last_index {
+                last_term = log.term;
+                last_idx = log.index;
+
+                fh.set_len(offset as u64)?; // truncate file
+                new_writer = Some(BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), fh));
+
+                break 'outer;
+            } else if log.index > last_index {
+                return Err(Error::msg("[truncate_logs]: gap detected")); // gap detected
             }
         }
 
-        if done {
-            break;
-        }
+        buf.clear();
+        old_paths.push(file.file_path.clone());
     }
 
-    let old_paths = files
-        .into_iter()
-        .map(|file| file.file_path)
-        .collect::<Vec<_>>();
-
-    let fname = generate_file_name();
-    let fh = open_or_create_file(&fname, parent_path)?;
-    let mut writer = BufWriter::with_capacity(LOG_FILE_FLUSH_LIMIT.into(), fh);
-
-    for log in &entries {
-        let payload = log
-            .serialize()
-            .with_context(|| format!("Failed to serialize log entry: {}", log.index))?;
-        writer
-            .write_all(payload.as_bytes())
-            .with_context(|| format!("Failed to write log entry: {}", log.index))?;
-    }
-
-    writer
-        .flush()
-        .with_context(|| "Failed to flush truncated log file")?;
-
-    let (last_term, last_idx) = entries
-        .last()
-        .map(|log| (log.term, log.index))
-        .unwrap_or((1, 0));
-
-    Ok((writer, last_term, last_idx, old_paths))
+    Ok((new_writer, last_term, last_idx, old_paths))
 }

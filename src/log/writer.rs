@@ -183,8 +183,9 @@ pub fn init_log_writer(
                             })
                             .unwrap();
 
-                    let old_writer = std::mem::replace(&mut log.curr_log_file, new_writer);
-                    drop(old_writer);
+                    if new_writer.is_some() {
+                        let _ = std::mem::replace(&mut log.curr_log_file, new_writer.unwrap());
+                    }
 
                     for path in old_paths {
                         if let Err(e) = std::fs::remove_file(&path) {

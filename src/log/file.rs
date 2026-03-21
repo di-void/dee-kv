@@ -32,7 +32,7 @@ pub fn open_or_create_file(name: &str, parent_dir: &Path) -> Result<File> {
     Ok(file)
 }
 
-pub fn open_file(path: &Path) -> Result<File> {
+pub fn open_append_file(path: &Path) -> Result<File> {
     let fh = OpenOptions::new().append(true).read(true).open(path)?;
     Ok(fh)
 }
@@ -111,7 +111,7 @@ pub fn replay_log_file(
     logs_map: &mut HashMap<String, Types>,
     buf: &mut Option<&mut Vec<(LogEntry, usize)>>,
 ) -> Result<()> {
-    let file = open_file(&file.file_path)?;
+    let file = open_append_file(&file.file_path)?;
     let file = BufReader::new(file);
 
     file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|line| {
