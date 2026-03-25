@@ -84,7 +84,7 @@ impl ConsensusSvc for ConsensusService {
         // log up-to-date check (compare term then index)
         let local_last_term = crate::log::get_last_log_term() as u32;
         let local_last_index = crate::log::get_last_log_index();
-        let _up_to_date = if candidate_last_term > local_last_term {
+        let up_to_date = if candidate_last_term > local_last_term {
             true
         } else if candidate_last_term < local_last_term {
             false
@@ -100,10 +100,10 @@ impl ConsensusSvc for ConsensusService {
             }
             if candidate_term >= node.term {
                 if node.voted_for.is_none() || node.voted_for == Some(candidate_id) {
-                    // if up_to_date {
-                    // }
-                    node.voted_for = Some(candidate_id);
-                    vote_granted = true;
+                    if up_to_date {
+                        node.voted_for = Some(candidate_id);
+                        vote_granted = true;
+                    }
                 }
             }
         }
@@ -214,7 +214,7 @@ impl ConsensusSvc for ConsensusService {
         if prev_log_idx > 0 {
             let mut log_entry: Option<LogEntry> = None;
             let mut _cache_entry_idx: usize = 0;
-            let mut disk_entry_page: u8 = 0; // PERF: initialize with last cache page
+            let mut disk_entry_page: u8 = 0; // PERF: initialize with first cache page
 
             {
                 let cache = self.logs_cache.read().await;
@@ -225,7 +225,7 @@ impl ConsensusSvc for ConsensusService {
             }
 
             if log_entry.is_none() {
-                // PERF: skip cached files
+                // PERF: skip cached pages
                 if let Some((entry, page)) = log::get_entry_from_disk(prev_log_idx, 0) {
                     log_entry = Some(entry);
                     disk_entry_page = page;
@@ -278,6 +278,9 @@ impl ConsensusSvc for ConsensusService {
         let entries_len = entries.len() as u32;
         let _ = handle_entries(entries, prev_log_idx, self.lw_tx.clone()).await?;
 
+        // we run again here in case current node has lagged a bit
+        // so that we can catch-up this node's FSM to at least majority
+        // subsequent heartbeats will tell us whether the leader commit moved again
         let _ = handle_leader_commit(
             leader_commit,
             prev_log_idx.saturating_add(entries_len),
@@ -304,7 +307,11 @@ async fn handle_leader_commit(
     if leader_commit > 0 {
         let commit_index = leader_commit.min(local_last_idx);
         let mut node = current_node.write().await;
-        if commit_index > node.commit_index {
+
+        // last_applied instead of node.commit_index is used
+        // because it is possible for the apply worker to run
+        // before writes are visible on disk
+        if commit_index > node.last_applied_idx {
             node.commit_index = commit_index;
             drop(node);
 

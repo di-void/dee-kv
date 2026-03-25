@@ -281,7 +281,7 @@ async fn run_leader_heartbeats(
                 let prev_log_term = crate::log::get_entry_term(prev_log_idx)
                     .map(|t| t as u32)
                     .unwrap_or(0);
-                let entries = crate::log::get_entries_from(next_index, MAX_APPEND_ENTRIES);
+                let entries = crate::log::get_entries_from_idx(next_index, MAX_APPEND_ENTRIES);
                 let last_entry_index = entries.last().map(|entry| entry.index);
                 let entries = build_append_entries(entries);
 
@@ -566,7 +566,7 @@ pub async fn apply_committed_entries(
     let mut new_last_applied = last_applied;
 
     while next_index <= commit_index {
-        let entries = crate::log::get_entries_from(next_index, MAX_APPLY_ENTRIES); // read from cache
+        let entries = crate::log::get_entries_from_idx(next_index, MAX_APPLY_ENTRIES); // read from cache
         if entries.is_empty() {
             break;
         }

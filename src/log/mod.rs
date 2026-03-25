@@ -395,7 +395,7 @@ pub fn find_first_index_of_term(term: LogTerm, _skip_n_pages: u8) -> Option<u32>
     None
 }
 
-pub fn get_entries_from(start_index: u32, max_entries: usize) -> Vec<LogEntry> {
+pub fn get_entries_from_idx(start_index: u32, max_entries: usize) -> Vec<LogEntry> {
     if max_entries == 0 {
         return Vec::new();
     }
