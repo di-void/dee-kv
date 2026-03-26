@@ -214,7 +214,10 @@ pub async fn ensure_sentinel_entry(lw_tx: &mpsc::Sender<LogMessage>) -> Result<(
     Ok(())
 }
 
-pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<(LogEntry, usize)>)> {
+pub fn load_or_init_kv_state(
+    data_dir: &str,
+    end_idx: LogIndex,
+) -> Result<(HashMap<String, Types>, Vec<(LogEntry, usize)>)> {
     let mut logs_map = HashMap::new();
     let data_dir_path = Path::new(data_dir);
     tracing::info!("Loading log..");
@@ -255,16 +258,17 @@ pub fn load_or_init(data_dir: &str) -> Result<(HashMap<String, Types>, Vec<(LogE
         return Ok((logs_map, vec![(entry, bytes.len())]));
     }
 
-    let mut buf = Vec::new();
+    let mut buf = Vec::new(); // to hold last 2 log files to initialize cache
     let mut buf_ref = None;
+    let mut logs_map_ref = Some(&mut logs_map);
 
     for (i, file) in files.into_iter().enumerate() {
+        // last 2 log files
         if i == files_len.saturating_sub(2) || i == files_len.saturating_sub(1) {
-            // last 2 log files
             buf_ref = Some(&mut buf);
         }
 
-        replay_log_file(file.clone(), &mut logs_map, &mut buf_ref)?;
+        replay_log_file(file.clone(), &mut logs_map_ref, &mut buf_ref, end_idx)?;
         tracing::debug!(file_path = ?file, "Replayed log file");
     }
 
@@ -298,7 +302,7 @@ pub fn get_last_log_term() -> LogTerm {
 
 pub fn get_entry_from_disk(index: u32, skip: u8) -> Option<(LogEntry, u8)> {
     let mut files = get_log_files(Path::new(DATA_DIR)).ok()?;
-    files.reverse(); // to search from behind
+    files.reverse(); // search from behind
 
     let delim = LOG_FILE_DELIM.as_bytes()[0];
     let files_iter = files.into_iter().skip(skip as usize);

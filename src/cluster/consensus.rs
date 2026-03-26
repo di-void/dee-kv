@@ -23,28 +23,6 @@ use tonic::{Request, transport::Channel};
 
 const MAX_APPEND_ENTRIES: usize = 64;
 
-/// Runs the continuous election loop for the local node and attempts to acquire leadership.
-///
-/// When an election timeout elapses, a follower is promoted to candidate (votes for itself),
-/// the node's metadata is persisted via the provided log-writer, and RequestVote RPCs are
-/// dispatched concurrently to all peers. Incoming consensus messages observed on `csus_rx`
-/// that are `ResetTimer` reset the election timer. If the collected votes
-/// reach `quorom`, the node is promoted to leader.
-///
-/// # Parameters
-///
-/// - `current_node`: shared mutable state for the local node.
-/// - `quorom`: number of votes required to become leader.
-/// - `p_table`: table of peer nodes used to create RPC clients.
-/// - `csus_rx`: watch receiver for consensus messages that can reset the election timer.
-/// - `lw`: sender to persist node metadata to the log writer.
-///
-/// # Examples
-///
-/// ```
-/// // Spawn the election loop (arguments omitted for brevity).
-/// // tokio::spawn(start_election(current_node, quorom, p_table, csus_rx, lw));
-/// ```
 #[tracing::instrument(skip_all, fields(quorum = quorum))]
 pub async fn start_election(
     current_node: Arc<RwLock<CurrentNode>>,
@@ -92,17 +70,17 @@ pub async fn start_election(
                 term = cw.term,
                 "Transitioned to Candidate, requesting votes"
             );
-            lw.send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
-                .await
-                .unwrap();
+            lw.send(LogMessage::NodeMeta {
+                curr_term: cw.term,
+                voted_for: cw.voted_for.clone(),
+                last_applied_idx: cw.last_applied_idx,
+            })
+            .await
+            .unwrap();
         };
+
         let (curr_term, candidate_id) = (cw.term, cw.id);
         drop(cw);
-
-        // // Prevent non-followers from sending RequestVote RPCs
-        // if !current_node.read().await.is_follower() {
-        //     return Ok(());
-        // }
 
         let pt = Arc::clone(&p_table);
         let clients = task::spawn_blocking(move || {
@@ -180,9 +158,13 @@ pub async fn start_election(
                                 "Discovered higher term, stepping down to Follower"
                             );
                             cw.step_down(peer_term as u16);
-                            lw.send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
-                                .await
-                                .unwrap();
+                            lw.send(LogMessage::NodeMeta {
+                                curr_term: cw.term,
+                                voted_for: cw.voted_for.clone(),
+                                last_applied_idx: cw.last_applied_idx,
+                            })
+                            .await
+                            .unwrap();
                             break;
                         }
                     }
@@ -224,14 +206,18 @@ async fn run_leader_heartbeats(
             let current_term = cw.term;
             cw.step_down(current_term);
             lw_tx
-                .send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
+                .send(LogMessage::NodeMeta {
+                    curr_term: cw.term,
+                    voted_for: cw.voted_for.clone(),
+                    last_applied_idx: cw.last_applied_idx,
+                })
                 .await
                 .unwrap();
             return;
         }
     };
 
-    // heartbeat loop
+    // prepare peers
     let leader_last_index = crate::log::get_last_log_index();
     for (_, peer) in &clients {
         let mut guard = peer.lock().await;
@@ -239,6 +225,7 @@ async fn run_leader_heartbeats(
         guard.match_index = 0;
     }
 
+    // heartbeat loop
     loop {
         // shutdown check
         if sd_rx.borrow().is_some() {
@@ -307,9 +294,13 @@ async fn run_leader_heartbeats(
                                 guard.match_index = last_index;
                                 guard.next_index = last_index.saturating_add(1);
                             } else {
+                                // if peer is synced up
                                 if prev_log_idx > guard.match_index {
+                                    // match_idx might still be 0 from init
                                     guard.match_index = prev_log_idx;
                                 }
+
+                                // cross-check that next_idx is the right place
                                 if guard.next_index < prev_log_idx.saturating_add(1) {
                                     guard.next_index = prev_log_idx.saturating_add(1);
                                 }
@@ -318,14 +309,16 @@ async fn run_leader_heartbeats(
                         } else {
                             let mut guard = peer.lock().await;
                             let next_index = match resp.conflict_term {
+                                // if conflict term is 1, sentinel index (0) can be returned
+                                // so we clamp outside
                                 Some(conflict_term) => crate::log::find_first_index_of_term(
                                     conflict_term as crate::LogTerm,
                                     0,
                                 )
                                 .unwrap_or(resp.conflict_index),
-                                None => resp.conflict_index,
+                                None => resp.conflict_index, // can be 0 if follower term is higher
                             }
-                            .max(1);
+                            .max(1); // clamp in case we get 0
                             guard.next_index = next_index;
                             Err(None)
                         }
@@ -338,21 +331,18 @@ async fn run_leader_heartbeats(
 
         let mut step_down_term: Option<u32> = None;
 
-        while let Some(res) = futs.next().await {
-            if let Ok(r) = res {
-                match r {
-                    Ok(_) => {}
-                    Err(Some(peer_term)) => {
-                        step_down_term = Some(peer_term);
-                        break;
-                    }
-                    Err(None) => {}
+        while let Some(Ok(res)) = futs.next().await {
+            match res {
+                Ok(_) => {} // move on
+                Err(Some(peer_term)) => {
+                    step_down_term = Some(peer_term);
+                    break;
                 }
+                Err(_) => {}
             }
         }
 
         if let Some(peer_term) = step_down_term {
-            // step down and persist node meta
             let mut cw = current_node.write().await;
             if (peer_term as u16) > cw.term {
                 tracing::info!(
@@ -363,18 +353,22 @@ async fn run_leader_heartbeats(
                 );
                 cw.step_down(peer_term as u16);
                 lw_tx
-                    .send(LogMessage::NodeMeta(cw.term, cw.voted_for.clone()))
+                    .send(LogMessage::NodeMeta {
+                        curr_term: cw.term,
+                        voted_for: cw.voted_for.clone(),
+                        last_applied_idx: cw.last_applied_idx,
+                    })
                     .await
                     .unwrap();
             }
             break; // exit heartbeat loop to re-enter election cycle
         }
 
+        // PERF: maybe only call after quorum consensus
         update_commit_index(&current_node, &clients, quorum, curr_term, commit_index).await;
 
         let _ = apply_tx.send(ApplyMsg::Apply).await;
 
-        // sleep until next heartbeat round
         tokio::time::sleep(std::time::Duration::from_millis(
             crate::cluster::LEADER_HEARTBEAT_INTERVAL_MS as u64,
         ))

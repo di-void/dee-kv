@@ -18,9 +18,14 @@ pub enum LogMessage {
         meta: Option<(LogTerm, LogIndex)>,
     },
     Truncate {
-        last_index: u32,
+        last_index: LogIndex,
     },
-    NodeMeta(LogTerm, Option<u8>), // (currentTerm, votedFor)
+    // NodeMeta(LogTerm, Option<u8>, u32, u32), // (currentTerm, votedFor, commitIndex, lastAppliedIndex)
+    NodeMeta {
+        curr_term: LogTerm,
+        voted_for: Option<u8>,
+        last_applied_idx: LogIndex,
+    },
     ShutDown,
 }
 

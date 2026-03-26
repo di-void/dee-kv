@@ -83,6 +83,7 @@ impl CurrentNode {
             let meta = NodeMeta {
                 current_term: 1,
                 voted_for: None,
+                last_applied_idx: 0,
             };
             std::fs::write(&meta_path, meta.serialize()?.as_bytes())?;
             meta
@@ -101,8 +102,8 @@ impl CurrentNode {
             role: Default::default(),
             voted_for: node_meta.voted_for,
             votes,
-            commit_index: 0,
-            last_applied_idx: 0,
+            commit_index: node_meta.last_applied_idx,
+            last_applied_idx: node_meta.last_applied_idx,
         })
     }
     pub fn promote(&mut self) {

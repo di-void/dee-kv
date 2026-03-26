@@ -31,7 +31,7 @@ fn main() -> anyhow::Result<()> {
     let env_vars = env::get_env_vars();
     let cluster = cluster::config::parse_cluster_config(args, env_vars)?;
     let current_node = CurrentNode::from_meta(cluster.self_id)?;
-    let (state, logs) = log::load_or_init(DATA_DIR)?;
+    let (state, logs) = log::load_or_init_kv_state(DATA_DIR, current_node.commit_index)?;
     let rt_handle = rt.handle();
 
     rt.block_on(async move {
@@ -53,11 +53,11 @@ fn main() -> anyhow::Result<()> {
         let lw_handle =
             log::writer::init_log_writer(current_node.term, lw_rx, Arc::clone(&logs_cache));
         let current_node = Arc::new(RwLock::new(current_node));
-        let store = Arc::new(RwLock::new(Store::from_state(state)));
+        let kv = Arc::new(RwLock::new(Store::from_state(state)));
 
         tokio::spawn(run_apply_worker(
             Arc::clone(&current_node),
-            Arc::clone(&store),
+            Arc::clone(&kv),
             apply_rx,
             shd_rx.clone(),
         ));
@@ -72,7 +72,7 @@ fn main() -> anyhow::Result<()> {
         let server_handle = server::start(
             cluster.self_address.clone(),
             Arc::clone(&current_node),
-            Arc::clone(&store),
+            Arc::clone(&kv),
             Arc::clone(&logs_cache),
             lw_tx.clone(),
             apply_tx.clone(),

@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_MAX_DELTA};
+use crate::{LOG_FILE_DELIM, LOG_FILE_EXT, LOG_FILE_MAX_DELTA, LogIndex};
 use crate::{
     serde::{LogEntry, deserialize_entry},
     state::Types,
@@ -108,45 +108,56 @@ pub fn check_file_delta(file_size: u64, max_size: u64) -> u8 {
 
 pub fn replay_log_file(
     file: LogFile,
-    logs_map: &mut HashMap<String, Types>,
+    logs_map: &mut Option<&mut HashMap<String, Types>>,
     buf: &mut Option<&mut Vec<(LogEntry, usize)>>,
+    end_idx: LogIndex,
 ) -> Result<()> {
     let file = open_append_file(&file.file_path)?;
     let file = BufReader::new(file);
 
-    file.split(LOG_FILE_DELIM.as_bytes()[0]).for_each(|line| {
-        let bytes = match line {
-            Ok(bytes) => bytes,
-            _ => return,
-        };
+    for line in file.split(LOG_FILE_DELIM.as_bytes()[0]) {
+        let bytes = line?;
 
         if bytes.is_empty() {
-            return;
+            continue;
         }
 
         let log = match deserialize_entry::<LogEntry>(&bytes) {
             Ok(log) => log,
-            _ => return,
+            _ => continue,
         };
 
         if log.index == 0 {
-            return;
+            continue;
+        }
+
+        if end_idx < log.index {
+            let _ = logs_map.take(); // drop kv ref
         }
 
         use crate::serde::Payload;
-        match log.payload {
-            Payload::Put { ref key, ref value } => {
-                logs_map.insert(key.clone(), value.clone().into());
+        if logs_map.is_some() {
+            let kv = logs_map.take().unwrap(); // take state ref
+            match log.payload {
+                Payload::Put { ref key, ref value } => {
+                    kv.insert(key.clone(), value.clone().into());
+                }
+                Payload::Delete { ref key } => {
+                    kv.remove(key);
+                }
             }
-            Payload::Delete { ref key } => {
-                logs_map.remove(key);
-            }
+
+            let _ = logs_map.insert(kv); // put it back
+        }
+
+        if end_idx == log.index {
+            let _ = logs_map.take(); // drop kv ref
         }
 
         if buf.is_some() {
             buf.take().unwrap().push((log, bytes.len()));
         }
-    });
+    }
 
     Ok(())
 }

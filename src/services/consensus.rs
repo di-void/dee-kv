@@ -1,5 +1,5 @@
 use crate::{
-    ConsensusMessage, LogMessage, Op,
+    ConsensusMessage, LogIndex, LogMessage, Op,
     cluster::{ApplyMsg, CurrentNode},
     consensus_proto::{
         AppendEntriesRequest, AppendEntriesResponse, Command, Entry, RequestVoteRequest,
@@ -116,14 +116,14 @@ impl ConsensusSvc for ConsensusService {
             );
             // persist node meta
             let node = self.current_node.read().await;
-            let persist_term = node.term;
-            let persist_voted_for = node.voted_for.clone();
+            let log_msg = LogMessage::NodeMeta {
+                curr_term: node.term,
+                voted_for: node.voted_for.clone(),
+                last_applied_idx: node.last_applied_idx,
+            };
             drop(node);
 
-            let _ = self
-                .lw_tx
-                .send(LogMessage::NodeMeta(persist_term, persist_voted_for))
-                .await;
+            let _ = self.lw_tx.send(log_msg).await;
 
             // reset election timer
             let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
@@ -170,8 +170,8 @@ impl ConsensusSvc for ConsensusService {
         let _ = self.csus_tx.send(ConsensusMessage::ResetTimer);
 
         let mut need_persist = false;
+        let log_msg: LogMessage;
         let local_term: crate::LogTerm;
-        let voted_for: Option<u8>;
 
         {
             let mut node = self.current_node.write().await;
@@ -190,15 +190,16 @@ impl ConsensusSvc for ConsensusService {
                 need_persist = true;
             }
 
+            log_msg = LogMessage::NodeMeta {
+                curr_term: node.term,
+                voted_for: node.voted_for.clone(),
+                last_applied_idx: node.last_applied_idx,
+            };
             local_term = node.term;
-            voted_for = node.voted_for.clone();
         }
 
         if need_persist {
-            let _ = self
-                .lw_tx
-                .send(LogMessage::NodeMeta(local_term, voted_for))
-                .await;
+            let _ = self.lw_tx.send(log_msg).await;
         }
 
         let local_last_index = crate::log::get_last_log_index(); // get last log index
@@ -299,13 +300,13 @@ impl ConsensusSvc for ConsensusService {
 }
 
 async fn handle_leader_commit(
-    leader_commit: u32,
-    local_last_idx: u32,
+    leader_commit_idx: LogIndex,
+    local_last_idx: LogIndex,
     apply_tx: mpsc::Sender<ApplyMsg>,
     current_node: Arc<RwLock<CurrentNode>>,
 ) -> Result<(), Status> {
-    if leader_commit > 0 {
-        let commit_index = leader_commit.min(local_last_idx);
+    if leader_commit_idx > 0 {
+        let commit_index = leader_commit_idx.min(local_last_idx);
         let mut node = current_node.write().await;
 
         // last_applied instead of node.commit_index is used
@@ -328,7 +329,7 @@ async fn handle_leader_commit(
 
 async fn handle_entries(
     entries: Vec<Entry>,
-    prev_log_idx: u32,
+    prev_log_idx: LogIndex,
     lw_tx: mpsc::Sender<LogMessage>,
 ) -> Result<(), Status> {
     if let Err(err) = lw_tx

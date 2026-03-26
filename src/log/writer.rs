@@ -203,10 +203,15 @@ pub fn init_log_writer(
                         "Truncated log"
                     );
                 }
-                LogMessage::NodeMeta(current_term, voted_for) => {
+                LogMessage::NodeMeta {
+                    curr_term: current_term,
+                    voted_for,
+                    last_applied_idx,
+                } => {
                     let meta = NodeMeta {
                         current_term,
                         voted_for,
+                        last_applied_idx,
                     };
 
                     if current_term != term {

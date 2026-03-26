@@ -54,6 +54,7 @@ impl LogEntry {
 pub struct NodeMeta {
     pub current_term: LogTerm,
     pub voted_for: Option<u8>,
+    pub last_applied_idx: LogIndex,
 }
 
 impl CustomSerialize for NodeMeta {
